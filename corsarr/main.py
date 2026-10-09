@@ -18,7 +18,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes, Messag
 from . import config, web
 from .bot import CorsarrBot
 from .checks import run_checks
-from .db import DB
+from .db import DB, DatabaseTooNew
 from .feedback import FeedbackService
 from .i18n import t
 from .jellyfin import Jellyfin
@@ -74,7 +74,14 @@ class Runtime:
 
     def __init__(self, cfg: config.Config):
         self.cfg = cfg
-        self.db = DB(cfg.db_path)
+        self.db: DB | None = None
+        self.db_error = ""
+        try:
+            self.db = DB(cfg.db_path)
+        except DatabaseTooNew as e:
+            # Keep the web interface up so the problem is visible there; the bot itself can't start.
+            self.db_error = t("log.db_too_new", found=e.found, path=cfg.db_path)
+            log.error(self.db_error)
         self.started_at = time.time()
         self.state = "stopped"  # 'starting' | 'running' | 'unconfigured' | 'error' | 'stopped'
         self.state_detail = ""
@@ -105,6 +112,9 @@ class Runtime:
 
     async def _start(self) -> None:
         cfg = self.cfg
+        if self.db is None:
+            self.state, self.state_detail = "error", self.db_error
+            return
         if not cfg.complete:
             self.state, self.state_detail = "unconfigured", ", ".join(cfg.errors)
             log.warning(t("log.config_incomplete", fields=", ".join(cfg.errors)))

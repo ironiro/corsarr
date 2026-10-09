@@ -23,8 +23,8 @@ def test_version_from_git_without_running_git(tmp_path):
     assert updates._git_head(git) == SHA_OLD
 
 
-def test_check_lists_new_commits_newest_first(monkeypatch):
-    monkeypatch.setattr(updates, "_cache", None)
+def test_dev_channel_lists_new_commits_newest_first(monkeypatch):
+    monkeypatch.setattr(updates, "_cache", {})
     monkeypatch.setattr(updates, "current_version", lambda: SHA_OLD)
     seen = []
 
@@ -37,16 +37,16 @@ def test_check_lists_new_commits_newest_first(monkeypatch):
 
     async def go():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await updates.check(client=client)
+            return await updates.check("dev", client=client)
 
     info = asyncio.run(go())
     assert seen == [f"/repos/{updates.UPSTREAM}/compare/{SHA_OLD}...{updates.BRANCH}"]
-    assert info["behind"] == 2 and info["latest"] == SHA_NEW
+    assert info["behind"] == 2 and info["latest"] == SHA_NEW and info["target"] == updates.BRANCH
     assert [c["message"] for c in info["commits"]] == ["Add B", "Fix A"]
 
 
 def test_check_reports_github_errors(monkeypatch):
-    monkeypatch.setattr(updates, "_cache", None)
+    monkeypatch.setattr(updates, "_cache", {})
     monkeypatch.setattr(updates, "current_version", lambda: SHA_OLD)
 
     async def go():
@@ -64,8 +64,8 @@ def test_running_update_is_detected_from_trigger_and_log(tmp_path, monkeypatch):
     (tmp_path / "logs").mkdir()
     log = tmp_path / "logs" / "update.log"
     assert not updates.updating(tmp_path)
-    updates.request_update()
-    assert trigger.exists() and updates.updating(tmp_path)  # requested, not picked up yet
+    updates.request_update("v1.2.0")
+    assert trigger.read_text().strip() == "v1.2.0" and updates.updating(tmp_path)  # requested, not picked up yet
     trigger.unlink()
     log.write_text("==> Updating code …\n==> Setting up Python environment …\n")
     assert updates.updating(tmp_path)  # install.sh still running
@@ -84,3 +84,56 @@ def test_install_kind(monkeypatch):
     monkeypatch.delenv("CORSARR_UPDATE_TRIGGER")
     monkeypatch.setenv("CORSARR_VERSION", SHA_OLD)
     assert updates.install_kind() == "docker"
+
+
+RELEASES = [
+    {"tag_name": "v1.3.0-beta.2", "name": "1.3.0 beta 2", "prerelease": True, "draft": False, "body": "new skins"},
+    {"tag_name": "v1.2.1", "name": "1.2.1", "prerelease": False, "draft": False, "body": "fix"},
+    {"tag_name": "v1.3.0-beta.1", "name": "1.3.0 beta 1", "prerelease": True, "draft": False, "body": ""},
+    {"tag_name": "v1.2.0", "name": "1.2.0", "prerelease": False, "draft": False, "body": ""},
+    {"tag_name": "v2.0.0", "name": "draft", "prerelease": False, "draft": True, "body": ""},
+    {"tag_name": "nightly", "name": "x", "prerelease": True, "draft": False, "body": ""},
+]
+
+
+def check_releases(monkeypatch, current, channel):
+    monkeypatch.setattr(updates, "_cache", {})
+    monkeypatch.setattr(updates, "current_version", lambda: current)
+
+    async def go():
+        transport = httpx.MockTransport(lambda r: httpx.Response(200, json=RELEASES))
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await updates.check(channel, client=client)
+    return asyncio.run(go())
+
+
+def test_stable_channel_ignores_betas_drafts_and_odd_tags(monkeypatch):
+    info = check_releases(monkeypatch, "v1.2.0", "stable")
+    assert info["latest"] == info["target"] == "v1.2.1" and info["behind"] == 1 and not info["downgrade"]
+    assert [r["tag"] for r in info["releases"]] == ["v1.2.1"]
+    assert check_releases(monkeypatch, "v1.2.1", "stable")["target"] is None  # up to date
+
+
+def test_beta_channel_takes_the_newest_release_of_any_kind(monkeypatch):
+    info = check_releases(monkeypatch, "v1.2.0", "beta")
+    assert info["target"] == "v1.3.0-beta.2" and info["behind"] == 3
+    assert updates.version_key("v1.3.0-beta.2") < updates.version_key("v1.3.0")
+
+
+def test_back_from_beta_to_stable_is_a_downgrade(monkeypatch):
+    info = check_releases(monkeypatch, "v1.3.0-beta.2", "stable")
+    assert info["target"] == "v1.2.1" and info["downgrade"] and info["behind"] == 0
+
+
+def test_dev_commit_is_offered_the_channels_release(monkeypatch):
+    info = check_releases(monkeypatch, SHA_OLD, "stable")
+    assert info["target"] == "v1.2.1" and info["behind"] == 1 and not info["downgrade"]
+
+
+def test_version_file_and_targets(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORSARR_VERSION", raising=False)
+    monkeypatch.setattr(updates, "VERSION_FILE", tmp_path / ".corsarr-version")
+    (tmp_path / ".corsarr-version").write_text("v1.2.1\n")
+    assert updates.current_version() == "v1.2.1"
+    assert updates.valid_target("v1.3.0-beta.2") and updates.valid_target("main")
+    assert not updates.valid_target("v1.2") and not updates.valid_target("--upload-pack=x")

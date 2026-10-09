@@ -3,8 +3,10 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh)"
 #
-# Run as root. Running it again updates to the latest version; settings and data are kept.
-# Overridable: CORSARR_REPO, CORSARR_BRANCH, CORSARR_DIR (code), CORSARR_DATA (data), CORSARR_PORT.
+# Run as root. Running it again updates to the newest version of the update channel chosen in the web
+# interface (stable by default); settings and data are kept, and a backup is made before every update.
+# Overridable: CORSARR_REF (a release tag like v1.2.0, or "main"), CORSARR_CHANNEL (stable/beta/dev, for a
+# new installation), CORSARR_REPO, CORSARR_BRANCH, CORSARR_DIR (code), CORSARR_DATA (data), CORSARR_PORT.
 set -euo pipefail
 # A locale every Debian/Ubuntu has – avoids "Setting locale failed" warnings when the calling shell
 # (SSH, Proxmox console) uses a locale that isn't installed here.
@@ -20,6 +22,24 @@ SVC_USER=corsarr
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Copy of the database and settings before an update, so switching back to an older version (or a
+# failed update) can be undone. Keeps the last 5 in $DATA_DIR/backups; readable only by the service user.
+backup_before_update() {
+    [ -f "$DATA_DIR/corsarr.db" ] || return 0
+    local from target
+    from="$(cat "$APP_DIR/.corsarr-version" 2>/dev/null || git -C "$APP_DIR" rev-parse --short HEAD)"
+    target="$DATA_DIR/backups/pre-update-$(date +%Y%m%d-%H%M%S)-$from"
+    say "Backing up data to $target …"
+    mkdir -p "$target"
+    # SQLite's backup API: a consistent copy even while the bot is writing
+    python3 -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close()' \
+        "$DATA_DIR/corsarr.db" "$target/corsarr.db"
+    [ -f "$DATA_DIR/config.json" ] && cp "$DATA_DIR/config.json" "$target/"
+    chmod -R go-rwx "$DATA_DIR/backups"
+    chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR/backups"
+    ls -1d "$DATA_DIR"/backups/pre-update-* | sort | head -n -5 | xargs -r rm -rf
+}
 
 [ "$(id -u)" -eq 0 ] || die "Please run as root."
 # Never install directly on a Proxmox VE host – that is what deploy/proxmox.sh (a container) is for.
@@ -47,16 +67,55 @@ fi
 mkdir -p "$DATA_DIR"
 chown "$SVC_USER:$SVC_USER" "$DATA_DIR"
 
+# --- what to install: a release tag, or the main branch for the dev channel -------------------------
+CHANNEL="${CORSARR_CHANNEL:-}"
+if [ -z "$CHANNEL" ] && [ -f "$DATA_DIR/config.json" ]; then  # the channel chosen in the web interface
+    CHANNEL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("UPDATE_CHANNEL", ""))' \
+        "$DATA_DIR/config.json" 2>/dev/null || true)"
+fi
+CHANNEL="${CHANNEL:-stable}"
+REF="${CORSARR_REF:-}"
+if [ -z "$REF" ]; then
+    if [ "$CHANNEL" = "dev" ]; then
+        REF="$BRANCH"
+    else
+        # Newest release tag of the channel; betas (vX.Y.Z-beta.N) sort before their release.
+        REF="$(git ls-remote --tags --refs "$REPO" 'v*' | python3 -c '
+import re, sys
+beta = sys.argv[1] == "beta"
+tags = []
+for line in sys.stdin:
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?", line.split("refs/tags/")[-1].strip())
+    if m and (beta or m.group(4) is None):
+        tags.append(((int(m[1]), int(m[2]), int(m[3]), int(m[4]) if m[4] else 10**9), m.group(0)))
+print(max(tags)[1] if tags else "")' "$CHANNEL")" || die "Could not reach $REPO."
+        if [ -z "$REF" ]; then
+            say "No $CHANNEL release yet – installing the development version."
+            REF="$BRANCH"
+        fi
+    fi
+fi
+# The web interface passes the target through a file the service user can write: accept only tag/branch names.
+echo "$REF" | grep -Eq '^(v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?|[A-Za-z0-9][A-Za-z0-9._-]*)$' || die "Invalid version: $REF"
+
 UPDATE=0
 if [ -d "$APP_DIR/.git" ]; then
     UPDATE=1
-    say "Updating code ($APP_DIR) …"
-    git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
+    backup_before_update
+    say "Updating code ($APP_DIR) to $REF …"
+    git -C "$APP_DIR" fetch --quiet --tags --force origin "$BRANCH"
+else
+    say "Downloading code to $APP_DIR ($REF) …"
+    git clone --quiet "$REPO" "$APP_DIR"
+fi
+if [ "$REF" = "$BRANCH" ]; then
     git -C "$APP_DIR" checkout --quiet "$BRANCH"
     git -C "$APP_DIR" reset --quiet --hard "origin/$BRANCH"
+    rm -f "$APP_DIR/.corsarr-version"
 else
-    say "Downloading code to $APP_DIR …"
-    git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR"
+    git -C "$APP_DIR" rev-parse --quiet --verify "refs/tags/$REF" >/dev/null || die "Version $REF not found."
+    git -C "$APP_DIR" checkout --quiet --force --detach "refs/tags/$REF"
+    echo "$REF" > "$APP_DIR/.corsarr-version"  # shown as the version in the web interface
 fi
 
 say "Setting up Python environment …"
@@ -88,7 +147,8 @@ for _ in $(seq 1 30); do
         fi
         echo "    Web interface:  http://${IP:-<ip-of-this-container>}:$PORT/"
         echo "    Logs:           journalctl -u $SERVICE -f"
-        echo "    Update:         run this script again"
+        echo "    Version:        $REF"
+        echo "    Update:         in the web interface, or run this script again"
         exit 0
     fi
     sleep 1

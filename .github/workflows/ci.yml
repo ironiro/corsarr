@@ -39,10 +39,25 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/corsarr  # image names must be lowercase
+          # Release vX.Y.Z → latest, stable, beta, X.Y.Z, X.Y · pre-release vX.Y.Z-beta.N → beta, X.Y.Z-beta.N
+          # · push to main → edge
+          flavor: latest=false
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=beta,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable={{is_default_branch}}
             type=sha,format=short
+      - id: channel
+        # The image tells the web interface which channel it belongs to (and which version it is).
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*-*) echo "channel=beta" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT" ;;
+            refs/tags/v*)   echo "channel=stable" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT" ;;
+            *)              echo "channel=dev" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
+          esac
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -50,6 +65,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: CORSARR_VERSION=${{ github.sha }}
+          build-args: |
+            CORSARR_VERSION=${{ steps.channel.outputs.version }}
+            CORSARR_CHANNEL=${{ steps.channel.outputs.channel }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

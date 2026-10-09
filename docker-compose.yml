@@ -7,6 +7,7 @@
 # Then open http://<ip-of-this-host>:8787/ and set everything up in the web interface.
 services:
   corsarr:
+    # :latest (= :stable) tested releases · :beta pre-releases · :edge every commit on main · :1.2.0 a fixed version
     image: ghcr.io/ironiro/corsarr:latest
     build: .                 # used if the image cannot be pulled, or with: docker compose up -d --build
     container_name: corsarr

@@ -214,6 +214,7 @@ function renderStatus() {
 
 // --- version and updates -----------------------------------------------------------------
 const short = sha => (sha || "").slice(0, 7);
+const fmtVersion = v => !v ? T.update_unknown : /^v\d/.test(v) ? v : short(v);  // release tag or commit
 
 async function loadUpdate(force) {
   try {
@@ -233,31 +234,46 @@ function renderVersion() {
   } }, T.check_updates);
   const rows = [];
   rows.push(h("dl", { class: "facts" },
-    h("dt", {}, T.version_current), h("dd", {}, u.current ? short(u.current) : T.update_unknown),
-    u.latest ? [h("dt", {}, T.version_latest), h("dd", {}, short(u.latest))] : null));
+    h("dt", {}, T.version_current), h("dd", {}, fmtVersion(u.current)),
+    u.latest ? [h("dt", {}, T.version_latest), h("dd", {}, fmtVersion(u.latest))] : null,
+    h("dt", {}, T.channel), h("dd", {}, T["channel_" + u.channel] || u.channel)));
 
   let pill;
+  const offer = u.target && (u.behind > 0 || u.downgrade);
   if (u.error) {
     pill = h("span", { class: "pill error" }, T.status_error);
     rows.push(h("div", { class: "notice error" }, tr("update_check_failed", { error: u.error })));
   } else if (u.updating) {
     pill = h("span", { class: "pill warn" }, T.updating_short);
     rows.push(h("div", { class: "notice warn" }, T.updating));
-  } else if (u.behind > 0) {
-    pill = h("span", { class: "pill warn" }, tr("update_available", { n: u.behind }));
-    rows.push(h("ul", { class: "changes" }, u.commits.map(c =>
-      h("li", {}, h("code", {}, short(c.sha)), " ", c.message, h("span", { class: "muted" }, " · " + c.date.slice(0, 10))))));
+  } else if (offer) {
+    pill = h("span", { class: "pill warn" }, u.channel === "dev" ? tr("update_available", { n: u.behind })
+      : tr(u.downgrade ? "update_older" : "update_release", { version: u.target }));
+    if (u.downgrade) rows.push(h("div", { class: "notice warn" }, tr("update_downgrade_confirm", { version: u.target })));
+    if (u.commits.length) {
+      rows.push(h("ul", { class: "changes" }, u.commits.map(c =>
+        h("li", {}, h("code", {}, short(c.sha)), " ", c.message, h("span", { class: "muted" }, " · " + c.date.slice(0, 10))))));
+    }
+    for (const r of u.releases) {
+      rows.push(h("details", { class: "release", open: r === u.releases[0] },
+        h("summary", {}, r.name, r.prerelease ? h("span", { class: "pill warn" }, "beta") : "",
+          h("span", { class: "muted" }, " · " + r.date.slice(0, 10))),
+        h("pre", { class: "notes" }, r.notes || "–")));
+    }
     if (u.kind === "service") {
       rows.push(h("button", { class: "btn primary", onclick: startUpdate }, T.update_now));
     } else if (u.kind === "docker") {
       rows.push(h("p", { class: "hint" }, T.update_docker, " ", h("code", {}, "docker compose pull && docker compose up -d")));
     } else {
-      rows.push(h("p", { class: "hint" }, T.update_manual, " ", h("code", {}, "git pull")));
+      rows.push(h("p", { class: "hint" }, T.update_manual, " ",
+        h("code", {}, u.channel === "dev" ? "git pull" : `git fetch --tags && git checkout ${u.target}`)));
     }
   } else if (u.latest) {
     pill = h("span", { class: "pill ok" }, T.up_to_date);
+  } else if (u.channel !== "dev") {
+    rows.push(h("p", { class: "hint" }, tr("no_release", { channel: T["channel_" + u.channel] || u.channel })));
   }
-  if (u.log && (u.updating || u.behind > 0 || u.error)) {
+  if (u.log && (u.updating || offer || u.error)) {
     rows.push(h("details", { open: u.updating }, h("summary", {}, T.update_log), h("pre", { class: "log-tail" }, u.log)));
   }
   box.replaceChildren(h("div", { class: "card" },
@@ -265,10 +281,11 @@ function renderVersion() {
 }
 
 async function startUpdate(e) {
-  if (!confirm(T.update_confirm)) return;
+  const downgrade = !!updateInfo.downgrade;  // already explained in the card; confirm once more
+  if (!confirm(downgrade ? tr("update_downgrade_confirm", { version: updateInfo.target }) : T.update_confirm)) return;
   e.target.disabled = true;
   try {
-    await api("/api/update", { method: "POST" });
+    await api("/api/update", { method: "POST", body: { downgrade } });
   } catch (err) {
     alert(err.message);
     e.target.disabled = false;
