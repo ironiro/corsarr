@@ -295,10 +295,11 @@ function renderVersion() {
         h("li", {}, h("code", {}, short(c.sha)), " ", c.message, h("span", { class: "muted" }, " · " + c.date.slice(0, 10))))));
     }
     for (const r of u.releases) {
-      rows.push(h("details", { class: "release", open: r === u.releases[0] },
-        h("summary", {}, r.name, r.prerelease ? h("span", { class: "pill warn" }, "beta") : "",
-          h("span", { class: "muted" }, " · " + r.date.slice(0, 10))),
-        h("pre", { class: "notes" }, r.notes || "–")));
+      const title = [r.name, r.prerelease ? h("span", { class: "pill warn" }, "beta") : "",
+        r.date ? h("span", { class: "muted" }, " · " + r.date.slice(0, 10)) : ""];
+      // Notes only exist when a GitHub release was written for the tag
+      rows.push(r.notes ? h("details", { class: "release", open: r === u.releases[0] },
+        h("summary", {}, title), h("pre", { class: "notes" }, r.notes)) : h("div", { class: "release" }, title));
     }
     if (u.kind === "service") {
       rows.push(h("button", { class: "btn primary", onclick: startUpdate }, T.update_now));
