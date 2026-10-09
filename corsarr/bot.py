@@ -589,6 +589,20 @@ class CorsarrBot:
             self.db.mark_imports_notified(ids)
             log.info(t("log.notified", text=text))
 
+    async def job_catch_up(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Imports whose webhook never arrived (Corsarr offline, network) – only with remembered access."""
+        for kind in ("sonarr", "radarr"):
+            url, key = self.cfg.get(f"{kind.upper()}_URL"), self.cfg.get(f"{kind.upper()}_API_KEY")
+            if not (url and key):
+                continue
+            try:
+                added = await arr.catch_up(self.db, kind, url, key)
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+                log.warning(t("log.catch_up_failed", service=kind.capitalize(), error=e))
+                continue
+            if added:
+                log.info(t("log.catch_up", service=kind.capitalize(), n=added))
+
     @in_chat_language
     async def job_feedback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self.down:
