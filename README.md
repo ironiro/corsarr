@@ -7,6 +7,10 @@ It also reports what Sonarr and Radarr downloaded, grouped together rather than 
 German). Powered by Claude Haiku via the Claude API, with a web interface for status, events and
 configuration.
 
+![Corsarr in a Telegram group: a suggestion card, feedback after the movie and download notifications](docs/images/telegram-chat.jpg)
+
+*Illustration with made-up names.*
+
 ## Features
 
 - **Suggestions:** `@bot find us a thriller for tonight` → 5–6 titles as **one browsable card** (◀️ ▶️):
