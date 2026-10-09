@@ -10,9 +10,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
 from aiohttp import web
 
-from . import arr, config, updates
+from . import arr, config, llm, monitor, updates
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
@@ -208,6 +209,46 @@ async def api_restart(request: web.Request) -> web.Response:
     return web.json_response(status_payload(rt))
 
 
+async def _json_body(request: web.Request) -> dict:
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+async def api_claude_models(request: web.Request) -> web.Response:
+    """Models for the picker. Uses a key typed into the form (not saved yet), else the saved one."""
+    rt = _rt(request)
+    key = str((await _json_body(request)).get("api_key") or rt.cfg.anthropic_api_key)
+    if not key:
+        return web.json_response({"models": [], "error": t("gui.options_need_key")})
+    try:
+        models = await llm.available_models(key)
+    except Exception as e:  # wrong key, no network – the form falls back to a text field
+        return web.json_response({"models": [], "error": monitor.describe_error(e)})
+    return web.json_response({"models": models, "recommended": llm.RECOMMENDED_MODEL, "error": ""})
+
+
+async def api_jellyfin_users(request: web.Request) -> web.Response:
+    """Jellyfin accounts for the picker. Uses address/key typed into the form, else the saved ones."""
+    rt = _rt(request)
+    body = await _json_body(request)
+    url = str(body.get("url") or rt.cfg.jellyfin_url).rstrip("/")
+    key = str(body.get("api_key") or rt.cfg.jellyfin_api_key)
+    if not url or not key:
+        return web.json_response({"users": [], "error": t("gui.options_need_jellyfin")})
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{url}/Users",
+                                 headers={"Authorization": f'MediaBrowser Client="Corsarr", Token="{key}"'})
+            r.raise_for_status()
+            users = sorted(u["Name"] for u in r.json() if u.get("Name"))
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+        return web.json_response({"users": [], "error": monitor.describe_error(e)})
+    return web.json_response({"users": users, "error": ""})
+
+
 async def api_update(request: web.Request) -> web.Response:
     """Installed vs. latest version; ?force=1 skips the cache (button "Check for updates")."""
     rt = _rt(request)
@@ -358,6 +399,8 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/restart", api_restart)
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/update", api_update)
+    app.router.add_post("/api/options/claude-models", api_claude_models)
+    app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
     app.router.add_post("/api/update", api_update_start)
     app.router.add_get("/api/config", api_config)
     app.router.add_put("/api/config", api_config_save)

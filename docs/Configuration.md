@@ -32,7 +32,7 @@ Telegram part starts as soon as everything is there.
 | Name | Required | Meaning |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | yes | API key from the Claude Console. |
-| `CLAUDE_MODEL` | – | Default `claude-haiku-5-5`. |
+| `CLAUDE_MODEL` | – | Default `claude-haiku-5-5` – recommended. Larger models cost 20–100 times as much per suggestion ([costs](Home.md#what-does-it-cost)) and are rarely noticeably better for picking movies. |
 
 ### Jellyfin
 
@@ -101,7 +101,12 @@ With both characters off, the bot writes in a plain, neutral style.
   notification.
 ![Configuration: bot behaviour and all connection settings](images/configuration.jpg)
 
-- **Configuration:** everything above. API keys are never shown – an empty field means "unchanged".
+- **Configuration:** everything above. *Bot behaviour* saves each change immediately ("✓ saved" next to it);
+  the connection settings below are saved together with **Save**, which is only active when something
+  changed. API keys are never shown – an empty field means "unchanged". The Jellyfin account and the Claude
+  model are picked from lists that Corsarr loads from Jellyfin and from your API key; the model list shows
+  what each model costs compared with the recommended Claude Haiku and warns before switching to an
+  expensive one.
 
 Without `ADMIN_PASSWORD` anyone on your home network can open the web interface and change settings, so
 **don't forward port 8787 to the internet**. Other websites still cannot trigger anything through your

@@ -360,6 +360,8 @@ async function viewConfig(main) {
     return;
   }
   renderConfig();
+  loadOptions("models");
+  loadOptions("users");
 }
 
 // Shown instead of an empty page when the bot cannot be reached (stopped, restarting, network).
@@ -368,52 +370,130 @@ function loadError(retry) {
     h("button", { class: "btn small", onclick: retry }, T.retry));
 }
 
+// --- pickers: Jellyfin accounts and Claude models, loaded live (also with values not saved yet) ---------
+const opts = { models: null, modelsError: "", users: null, usersError: "" };
+let savedSetting = null;  // behaviour setting that was just saved – shows "✓ saved" next to it
+
+async function loadOptions(which) {
+  const body = which === "models"
+    ? { api_key: dirty.ANTHROPIC_API_KEY || "" }
+    : { url: dirty.JELLYFIN_URL || "", api_key: dirty.JELLYFIN_API_KEY || "" };
+  try {
+    const res = await api(`/api/options/${which === "models" ? "claude-models" : "jellyfin-users"}`, { method: "POST", body });
+    opts[which] = res[which] && res[which].length ? res[which] : null;
+    opts[which + "Error"] = res.error || "";
+  } catch (e) {
+    opts[which] = null;
+    opts[which + "Error"] = e.message;
+  }
+  renderConfig();
+}
+
+const fmtUsd = x => {
+  const v = x >= 0.1 ? x.toFixed(2) : x.toFixed(3);
+  return document.documentElement.lang === "de" ? v.replace(".", ",") : v;
+};
+const modelInfo = id => (opts.models || []).find(m => m.id === id);
+
+function modelWarning(id) {
+  const m = modelInfo(id);
+  if (!m || m.recommended) return null;
+  const c = m.cost;
+  const text = tr("model_warn", { name: m.name, factor: c.factor, cost: fmtUsd(c.per_suggestion),
+                                  n: Math.max(1, Math.round(5 / c.per_suggestion)).toLocaleString() });
+  return h("div", { class: c.factor >= 100 ? "notice error" : "notice warn" }, c.factor >= 100 ? T.model_warn_strong + " " : "", text);
+}
+
+function pickerInput(f, id, current, onInput) {
+  if (f.name === "CLAUDE_MODEL" && opts.models) {
+    const ids = opts.models.map(m => m.id);
+    const options = opts.models.map(m => h("option", { value: m.id, selected: m.id === current },
+      m.recommended ? tr("model_option_recommended", { name: m.name, cost: fmtUsd(m.cost.per_suggestion) })
+                    : tr("model_option", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) })));
+    if (current && !ids.includes(current)) options.unshift(h("option", { value: current, selected: true }, current));
+    return h("select", { id, onchange: e => { onInput(e); renderConfig(); } }, options);
+  }
+  if (f.name === "JELLYFIN_USER" && opts.users) {
+    const options = opts.users.map(u => h("option", { value: u, selected: u === current }, u));
+    if (!current) options.unshift(h("option", { value: "", selected: true }, "–"));
+    else if (!opts.users.includes(current)) options.unshift(h("option", { value: current, selected: true }, tr("user_not_found", { name: current })));
+    return h("select", { id, onchange: onInput }, options);
+  }
+  return null;
+}
+
+// --- rendering --------------------------------------------------------------------------------------
 function renderConfig(message) {
   const box = document.getElementById("config");
   if (!box || !configData) return;
 
-  // Behaviour settings: saved immediately.
+  // Behaviour settings: saved immediately – the confirmation appears right next to the changed setting.
+  const savedMark = key => key === savedSetting ? h("span", { class: "saved-mark" }, T.setting_saved) : null;
   const behaviour = h("div", { class: "card" }, h("h2", {}, T.behaviour), h("p", { class: "hint" }, T.behaviour_hint),
     configData.settings.map(s => {
       const label = T["s_" + s.key] || s.key;
       if (s.kind === "bool") {
         return h("label", { class: "switch" },
-          h("input", { type: "checkbox", checked: s.value, onchange: e => saveSetting(s.key, e.target.checked) }), label);
+          h("input", { type: "checkbox", checked: s.value, onchange: e => saveSetting(s.key, e.target.checked) }), label,
+          savedMark(s.key));
       }
       return h("div", { class: "field" }, h("label", {}, label),
-        h("input", { type: "number", min: s.min, max: s.max, value: s.value,
-          onchange: e => saveSetting(s.key, e.target.value) }));
+        h("div", { class: "row" },
+          h("input", { type: "number", min: s.min, max: s.max, value: s.value, style: "max-width:140px",
+                       onchange: e => saveSetting(s.key, e.target.value) }), savedMark(s.key)));
     }));
 
-  // Connection and system fields: saved together, restart the bot.
+  // Connection and system fields: only saved with the button, then the bot restarts.
   const groups = GROUPS.map(g => {
     const fields = configData.fields.filter(f => f.group === g);
     return h("div", { class: "group" }, h("h3", {}, T["group_" + g]), fields.map(fieldRow));
   });
-  const saveBtn = h("button", { class: "btn primary", onclick: e => saveConfig(e.target) }, T.save);
-  const savebar = h("div", { class: "savebar" }, saveBtn, message || "");
+  const saveBtn = h("button", { class: "btn primary", id: "savebtn", onclick: e => saveConfig(e.target) }, T.save);
+  const savebar = h("div", { class: "savebar" }, saveBtn, h("span", { id: "unsaved", class: "muted" }), message || "");
   const conn = h("div", { class: "card" }, h("h2", {}, T.connection_settings),
     h("p", { class: "hint" }, T.connection_hint), groups, savebar);
 
   box.replaceChildren(behaviour, conn);
+  updateSaveBar();
+}
+
+function changeCount() {
+  return Object.keys(dirty).length + resets.size;
+}
+
+function updateSaveBar() {
+  const btn = document.getElementById("savebtn");
+  const note = document.getElementById("unsaved");
+  if (!btn || btn.dataset.busy) return;
+  const n = changeCount();
+  btn.disabled = n === 0;
+  if (note) note.textContent = n ? tr("unsaved", { n }) : "";
 }
 
 function fieldRow(f) {
   const id = "f_" + f.name;
   const current = f.name in dirty ? dirty[f.name] : (resets.has(f.name) ? "" : f.value);
   let input;
-  const onInput = e => { dirty[f.name] = e.target.value; resets.delete(f.name); };
+  const onInput = e => {
+    dirty[f.name] = e.target.value; resets.delete(f.name);
+    updateSaveBar();
+  };
+  // The pickers depend on these – reload them once a new address or key has been typed.
+  const reloads = { ANTHROPIC_API_KEY: "models", JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users" }[f.name];
   if (!f.editable) {
     input = h("input", { type: "text", id, value: f.value, disabled: true });
+  } else if ((input = pickerInput(f, id, current, onInput))) {
+    // select built above
   } else if (f.kind === "choice") {
     input = h("select", { id, onchange: onInput },
       f.choices.map(c => h("option", { value: c, selected: c === current }, c)));
   } else {
     input = h("input", {
-      id, type: f.secret ? "password" : (f.kind === "int" ? "text" : "text"),
+      id, type: f.secret ? "password" : "text",
       inputmode: f.kind === "int" ? "numeric" : null, value: f.secret ? (dirty[f.name] || "") : current,
       placeholder: f.secret ? (f.is_set ? T.secret_set : T.secret_unset) : (f.default || ""),
       autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", oninput: onInput,
+      onchange: reloads ? () => loadOptions(reloads) : null,
       class: f.error ? "invalid" : null,
     });
   }
@@ -425,10 +505,13 @@ function fieldRow(f) {
       resets.add(f.name); delete dirty[f.name]; renderConfig();
     } }, T.reset));
   } else if (f.source === "env") info.push(T.from_env);
+  const pickerError = { CLAUDE_MODEL: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
+  if (pickerError && input.tagName !== "SELECT") info.push(tr("options_fallback", { error: pickerError }));
   return h("div", { class: "field" },
     h("label", { for: id }, T["f_" + f.name] || f.name, f.required ? h("span", { class: "req", title: T.required }, " *") : "",
       h("span", { class: "name" }, f.name)),
     h("div", {}, input,
+      f.name === "CLAUDE_MODEL" ? modelWarning(current || f.default) : null,
       info.length ? h("div", { class: "info" }, info.map(i => typeof i === "string" ? h("span", {}, i) : i)) : null,
       f.error ? h("div", { class: "err" }, f.error) : null));
 }
@@ -436,14 +519,21 @@ function fieldRow(f) {
 async function saveSetting(key, value) {
   try {
     configData = await api("/api/settings", { method: "PUT", body: { [key]: value } });
-    renderConfig(h("span", { class: "pill ok" }, T.saved));
+    savedSetting = key;
+    renderConfig();
+    setTimeout(() => { if (savedSetting === key) { savedSetting = null; renderConfig(); } }, 2500);
   } catch (e) {
     renderConfig(h("span", { class: "pill error" }, T.save_failed + ": " + Object.values(e.data?.errors || {}).join(", ")));
   }
 }
 
 async function saveConfig(btn) {
+  const m = dirty.CLAUDE_MODEL && modelInfo(dirty.CLAUDE_MODEL);
+  if (m && !m.recommended && !confirm(tr("model_confirm", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) }))) {
+    return;
+  }
   btn.disabled = true;
+  btn.dataset.busy = "1";
   btn.textContent = T.saving;
   const oldLang = document.documentElement.lang;
   try {

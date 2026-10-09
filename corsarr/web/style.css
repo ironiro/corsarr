@@ -129,6 +129,8 @@ input.invalid { border-color: var(--err); }
 .changes li { margin: 3px 0; }
 .changes code, .hint code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
+.saved-mark { color: var(--ok); font-size: 13px; font-weight: 600; margin-left: 10px; }
+.field .notice { margin-top: 8px; font-size: 13px; }
 details { margin-top: 10px; font-size: 13px; }
 summary { cursor: pointer; color: var(--muted); }
 .log-tail { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border-radius: 8px; padding: 10px;
