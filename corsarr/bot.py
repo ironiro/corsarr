@@ -68,7 +68,7 @@ class CorsarrBot:
         return await self.bot.send_message(self.cfg.chat_id, text, **kwargs)
 
     async def enter_outage(self, reason: str) -> None:
-        log.warning(t("log.claude_down", reason=reason))
+        log.warning(t("log.llm_down", provider=self.llm.label, reason=reason))
         if not self.down:
             self.down = True
             self._last_outage_reply = time.monotonic()
@@ -152,7 +152,7 @@ class CorsarrBot:
         except LLMUnavailable as e:
             await self.enter_outage(str(e))
         except LLMFailed as e:
-            log.warning(t("log.llm_failed", error=e))
+            log.warning(t("log.llm_failed", provider=self.llm.label, error=e))
             await msg.reply_text(t("bot.failed"))
         except httpx.HTTPError as e:
             log.exception(t("log.backend_error"))
@@ -556,7 +556,7 @@ class CorsarrBot:
         except (LLMUnavailable, LLMFailed):
             return False
         self.down = False
-        log.info(t("log.claude_back"))
+        log.info(t("log.llm_back", provider=self.llm.label))
         await self.post(t("bot.recovered"))
         return True
 

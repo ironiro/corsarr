@@ -6,24 +6,28 @@ from typing import Awaitable, Callable
 
 from telegram import Bot
 
-from .config import Config
+from .config import PROVIDER_FIELDS, Config
 from .i18n import t
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
+from . import llm as llm_module
 from .llm import LLM
 from .monitor import describe_error, health
 
 # Config fields a service needs before it can be checked at all.
 NEEDS = {
     "telegram": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
-    "claude": ("ANTHROPIC_API_KEY", "CLAUDE_MODEL"),
     "jellyfin": ("JELLYFIN_URL", "JELLYFIN_API_KEY", "JELLYFIN_USER"),
     "jellyseerr": ("JELLYSEERR_URL", "JELLYSEERR_API_KEY"),
 }
 
 
 def configured(cfg: Config, service: str) -> bool:
-    return not any(name in cfg.errors for name in NEEDS[service])
+    if service == "llm":
+        needs = ("LLM_PROVIDER", *PROVIDER_FIELDS.get(cfg.llm_provider, {}).values())
+    else:
+        needs = NEEDS[service]
+    return not any(name in cfg.errors for name in needs)
 
 
 async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin | None = None,
@@ -32,7 +36,7 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
     """Check every configured service, update the shared health state and return {service: (ok, detail)}.
 
     Clients of a running bot can be passed in; missing ones are created for the check and closed again.
-    `ping=True` makes Claude generate a token (detects a reached spending limit, costs a fraction of a cent);
+    `ping=True` makes the language model generate a token (detects a reached spending limit, costs a fraction of a cent);
     otherwise only key and model are verified, which is free.
     """
     own: list[Callable[[], Awaitable[None]]] = []
@@ -42,8 +46,9 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
     if seerr is None and configured(cfg, "jellyseerr"):
         seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
         own.append(seerr.close)
-    if llm is None and configured(cfg, "claude"):
-        llm = LLM(cfg.anthropic_api_key, cfg.model)
+    if llm is None and configured(cfg, "llm"):
+        llm = llm_module.create(cfg)
+        own.append(llm.close)
 
     async def jellyfin_info() -> str:
         uid = await jellyfin.uid()
@@ -54,12 +59,12 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
         mv = await seerr.genres("movie")
         return t("check.jellyseerr", n=len(mv), examples=", ".join(g["name"] for g in mv[:5]))
 
-    async def claude_info() -> str:
+    async def llm_info() -> str:
         if ping:
             await llm.ping()
-            return t("check.claude_ping", model=cfg.model)
+            return t("check.llm_ping", provider=llm.label, model=cfg.model)
         await llm.check_model()
-        return t("check.claude_model", model=cfg.model)
+        return t("check.llm_model", provider=llm.label, model=cfg.model)
 
     async def telegram_info() -> str:
         async def describe(b: Bot) -> str:
@@ -72,7 +77,7 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
         async with Bot(cfg.telegram_token) as temp:
             return await describe(temp)
 
-    steps = {"jellyfin": jellyfin_info, "jellyseerr": seerr_info, "claude": claude_info,
+    steps = {"jellyfin": jellyfin_info, "jellyseerr": seerr_info, "llm": llm_info,
              "telegram": telegram_info}
     results: dict[str, tuple[bool, str]] = {}
 

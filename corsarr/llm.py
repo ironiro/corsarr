@@ -1,17 +1,24 @@
-"""Claude Haiku 5.5: understanding requests, picking titles, feedback traits, persona texts."""
+"""Language model: understanding requests, picking titles, feedback traits, persona texts.
+
+Claude (Haiku 5.5) is the tested and recommended provider. OpenAI, Gemini, Ollama and LM Studio are
+offered as well but untested.
+"""
 from __future__ import annotations
 
 import collections
 import json
 import logging
+import re
 from typing import Literal, Optional
 
 import anthropic
-from pydantic import BaseModel, Field
+import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 from . import persona
 from .i18n import t
-from .monitor import health
+from .config import DEFAULT_URLS, LOCAL_PROVIDERS, PROVIDER_NAMES
+from .monitor import describe_error, health
 from .models import Candidate
 
 log = logging.getLogger(__name__)
@@ -47,7 +54,7 @@ def model_cost(model_id: str) -> dict | None:
             "per_suggestion": round(SUGGESTION_COST_HAIKU * factor, 4)}
 
 
-async def available_models(api_key: str) -> list[dict]:
+async def available_claude_models(api_key: str) -> list[dict]:
     """Supported Claude models this API key may use, recommended first, then cheapest first."""
     client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=1, timeout=15)
     models = []
@@ -114,14 +121,243 @@ class TraitResult(BaseModel):
     reply: str = Field(description="short confirmation in the speaker's style")
 
 
-class LLM:
+class _Claude:
+    """Anthropic's API through the official SDK – the tested and recommended provider."""
+    provider = "claude"
+
     def __init__(self, api_key: str, model: str):
         self.client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=2, timeout=45)
         self.model = model
+
+    async def generate(self, system: str, user: str, output_format: type[BaseModel] | None, max_tokens: int):
+        try:
+            kwargs = dict(model=self.model, max_tokens=max_tokens,
+                          # Stable prefix (instructions, characters, genre lists) – cached across calls.
+                          system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                          output_config={"effort": "low"},
+                          messages=[{"role": "user", "content": user}])
+            if output_format is None:
+                resp = await self.client.messages.create(**kwargs)
+            else:
+                resp = await self.client.messages.parse(output_format=output_format, **kwargs)
+        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError,
+                anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+            raise LLMUnavailable(str(e)) from e
+        except anthropic.BadRequestError as e:
+            msg = str(e).lower()
+            if "usage limit" in msg or "credit balance" in msg or "billing" in msg:
+                raise LLMUnavailable(str(e)) from e
+            raise
+        except anthropic.APIStatusError as e:
+            if e.status_code >= 500:
+                raise LLMUnavailable(str(e)) from e
+            raise
+        health.ok("llm")
+
+        u = resp.usage
+        log.info("LLM %s: in=%s cache_read=%s cache_write=%s out=%s stop=%s",
+                 output_format.__name__ if output_format else "text", u.input_tokens,
+                 u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+                 resp.stop_reason)
+        if resp.stop_reason in ("refusal", "max_tokens"):
+            raise LLMFailed(resp.stop_reason)
+        if output_format is not None:
+            if resp.parsed_output is None:
+                raise LLMFailed("no parsed output")
+            return resp.parsed_output
+        return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+    async def check_model(self) -> None:
+        try:
+            await self.client.models.retrieve(self.model)
+        except anthropic.APIError as e:
+            raise LLMUnavailable(str(e)) from e
+
+    async def close(self) -> None:
+        await self.client.close()
+
+
+# Substrings of model ids that are not chat models (embeddings, speech, images, …).
+NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "audio", "realtime", "transcribe", "moderation", "image",
+            "imagen", "veo", "aqa", "davinci", "babbage", "search")
+
+
+class _OpenAICompatible:
+    """OpenAI, Gemini, Ollama and LM Studio through the OpenAI-compatible chat completions API.
+
+    UNTESTED: developed against the documented API only. Structured answers are requested as a JSON
+    schema and, since not every server honours that, the schema is also spelled out in the prompt.
+    """
+
+    def __init__(self, provider: str, model: str, api_key: str = "", url: str = ""):
+        self.provider, self.model = provider, model
+        base = (url or DEFAULT_URLS[provider]).rstrip("/")
+        if provider in LOCAL_PROVIDERS and not base.endswith("/v1"):
+            base += "/v1"
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # Local models on modest hardware can take minutes for a long answer.
+        self.client = httpx.AsyncClient(base_url=base, headers=headers,
+                                        timeout=300 if provider in LOCAL_PROVIDERS else 90)
+
+    async def _post(self, body: dict) -> dict:
+        try:
+            r = await self.client.post("/chat/completions", json=body)
+        except httpx.HTTPError as e:
+            raise LLMUnavailable(describe_error(e)) from e
+        if r.status_code == 400:
+            raise _BadRequest(_error_text(r))
+        if r.status_code >= 400:  # key, model, quota, server
+            raise LLMUnavailable(f"HTTP {r.status_code}: {_error_text(r)}")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise LLMFailed("response is not JSON") from e
+
+    async def generate(self, system: str, user: str, output_format: type[BaseModel] | None, max_tokens: int):
+        if output_format is not None:
+            schema = _inline_schema(output_format.model_json_schema())
+            user += "\n\n" + JSON_INSTRUCTION + json.dumps(schema, ensure_ascii=False)
+        body = {"model": self.model,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                # Reasoning models count their thinking against this limit, so leave plenty of room.
+                ("max_completion_tokens" if self.provider == "openai" else "max_tokens"): max_tokens * 4}
+        if output_format is not None:
+            body["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": output_format.__name__, "schema": schema, "strict": False}}
+        try:
+            data = await self._post(body)
+        except _BadRequest as e:
+            if "response_format" not in body:
+                raise LLMFailed(str(e)) from e
+            # Some servers or models don't support JSON schemas – the prompt still describes the format.
+            log.info("LLM %s: retrying without response_format (%s)", self.provider, e)
+            body.pop("response_format")
+            try:
+                data = await self._post(body)
+            except _BadRequest as e2:
+                raise LLMFailed(str(e2)) from e2
+        health.ok("llm")
+
+        try:
+            choice = data["choices"][0]
+            message = choice["message"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMFailed("unexpected response") from e
+        usage = data.get("usage") or {}
+        log.info("LLM %s %s: in=%s out=%s stop=%s", self.provider,
+                 output_format.__name__ if output_format else "text", usage.get("prompt_tokens"),
+                 usage.get("completion_tokens"), choice.get("finish_reason"))
+        if choice.get("finish_reason") == "length":
+            raise LLMFailed("max_tokens")
+        if message.get("refusal"):
+            raise LLMFailed("refusal")
+        text = THINK.sub("", message.get("content") or "").strip()
+        if output_format is None:
+            return text
+        return _parse_json(text, output_format)
+
+    async def list_models(self) -> list[str]:
+        try:
+            r = await self.client.get("/models")
+            r.raise_for_status()
+            ids = [str(m["id"]).removeprefix("models/") for m in r.json().get("data", [])]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as e:
+            raise LLMUnavailable(describe_error(e)) from e
+        ids = [i for i in ids if not any(s in i.lower() for s in NOT_CHAT)]
+        if self.provider == "gemini":
+            ids = [i for i in ids if "gemini" in i]
+        return sorted(set(ids))
+
+    async def check_model(self) -> None:
+        ids = await self.list_models()
+        if self.model not in ids and f"{self.model}:latest" not in ids:  # Ollama tags
+            raise LLMUnavailable(f"model {self.model} not found (available: {', '.join(ids[:10]) or '–'})")
+
+    async def close(self) -> None:
+        await self.client.aclose()
+
+
+class _BadRequest(Exception):
+    """HTTP 400 – the request itself was refused (unsupported parameter, malformed schema …)."""
+
+
+JSON_INSTRUCTION = "Answer with a single JSON object only, no other text, matching this JSON schema: "
+THINK = re.compile(r"<think>.*?</think>", re.S)  # reasoning some local models put into the answer
+
+
+def _error_text(r: httpx.Response) -> str:
+    try:
+        err = r.json().get("error")
+    except (ValueError, AttributeError):
+        return r.text[:200]
+    if isinstance(err, list) and err:
+        err = err[0].get("error", err[0]) if isinstance(err[0], dict) else err[0]
+    if isinstance(err, dict):
+        return str(err.get("message") or err)[:300]
+    return str(err or r.text)[:300]
+
+
+def _inline_schema(schema: dict) -> dict:
+    """Resolve $ref/$defs and drop titles: small servers and Gemini handle flat schemas better."""
+    defs = schema.get("$defs", {})
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return walk(defs[node["$ref"].rsplit("/", 1)[-1]])
+            return {k: walk(v) for k, v in node.items() if k not in ("$defs", "title")}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    return walk(schema)
+
+
+def _parse_json(text: str, output_format: type[BaseModel]) -> BaseModel:
+    """The JSON object in a reply, also when the model wrapped it in a code fence or added a sentence."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise LLMFailed("no JSON in the answer")
+    try:
+        return output_format.model_validate_json(text[start:end + 1])
+    except ValidationError as e:
+        raise LLMFailed(f"answer does not match the format: {e.error_count()} errors") from e
+
+
+def create(cfg) -> "LLM":
+    """The language model the configuration selects."""
+    if cfg.llm_provider == "claude":
+        return LLM(_Claude(cfg.llm_api_key, cfg.model))
+    return LLM(_OpenAICompatible(cfg.llm_provider, cfg.model, cfg.llm_api_key, cfg.llm_url))
+
+
+async def available_models(provider: str, api_key: str = "", url: str = "") -> list[dict]:
+    """Models for the picker: Claude with prices (recommended first), the others as plain ids."""
+    if provider == "claude":
+        return await available_claude_models(api_key)
+    backend = _OpenAICompatible(provider, "", api_key, url)
+    try:
+        ids = await backend.list_models()
+    finally:
+        await backend.close()
+    return [{"id": i, "name": i, "cost": None, "recommended": False} for i in ids]
+
+
+class LLM:
+    """What the bot asks the language model; the provider behind it is interchangeable."""
+
+    def __init__(self, backend):
+        self.backend = backend
         self.genre_context = ""
         self.tmdb_genre_names: dict[int, str] = {}
         # Last lines the characters said; fed back so they don't repeat themselves.
         self.recent_lines: collections.deque[str] = collections.deque(maxlen=15)
+
+    provider = property(lambda self: self.backend.provider)
+    model = property(lambda self: self.backend.model)
+    label = property(lambda self: PROVIDER_NAMES[self.backend.provider])
+
+    async def close(self) -> None:
+        await self.backend.close()
 
     def _remember(self, *texts: str) -> None:
         for text in texts:
@@ -152,65 +388,30 @@ class LLM:
             f"{json.dumps({g['id']: g['name'] for g in tmdb_tv}, ensure_ascii=False)}"
         )
 
-    def _system(self) -> list[dict]:
-        # Stable prefix (instructions, characters, genre lists) – cached across calls.
-        base = t("prompt.base", characters=persona.characters())
-        return [{"type": "text", "text": f"{base}\n\n{self.genre_context}",
-                 "cache_control": {"type": "ephemeral"}}]
+    def _system(self) -> str:
+        return f"{t('prompt.base', characters=persona.characters())}\n\n{self.genre_context}"
 
     async def _call(self, user: str, output_format: type[BaseModel] | None, max_tokens: int = 2000):
         try:
-            return await self._call_api(user, output_format, max_tokens)
+            return await self.backend.generate(self._system(), user, output_format, max_tokens)
         except LLMUnavailable as e:
-            health.error("claude", str(e))
+            health.error("llm", str(e))
             raise
-
-    async def _call_api(self, user: str, output_format: type[BaseModel] | None, max_tokens: int):
-        try:
-            kwargs = dict(model=self.model, max_tokens=max_tokens, system=self._system(),
-                          output_config={"effort": "low"},
-                          messages=[{"role": "user", "content": user}])
-            if output_format is None:
-                resp = await self.client.messages.create(**kwargs)
-            else:
-                resp = await self.client.messages.parse(output_format=output_format, **kwargs)
-        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError,
-                anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-            raise LLMUnavailable(str(e)) from e
-        except anthropic.BadRequestError as e:
-            msg = str(e).lower()
-            if "usage limit" in msg or "credit balance" in msg or "billing" in msg:
-                raise LLMUnavailable(str(e)) from e
-            raise
-        except anthropic.APIStatusError as e:
-            if e.status_code >= 500:
-                raise LLMUnavailable(str(e)) from e
-            raise
-        health.ok("claude")
-
-        u = resp.usage
-        log.info("LLM %s: in=%s cache_read=%s cache_write=%s out=%s stop=%s",
-                 output_format.__name__ if output_format else "text", u.input_tokens,
-                 u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
-                 resp.stop_reason)
-        if resp.stop_reason in ("refusal", "max_tokens"):
-            raise LLMFailed(resp.stop_reason)
-        if output_format is not None:
-            if resp.parsed_output is None:
-                raise LLMFailed("no parsed output")
-            return resp.parsed_output
-        return "".join(b.text for b in resp.content if b.type == "text").strip()
 
     async def ping(self) -> None:
         """A real (tiny) generation – also detects a reached spending limit."""
-        await self._call(t("prompt.ping"), None, max_tokens=50)
+        try:
+            await self._call(t("prompt.ping"), None, max_tokens=50)
+        except LLMFailed:
+            pass  # it answered, just not usefully (e.g. a reasoning model ran out of tokens) – reachable
 
     async def check_model(self) -> None:
         """Free check for the periodic status: key valid and model available, no tokens used."""
         try:
-            await self.client.models.retrieve(self.model)
-        except anthropic.APIError as e:
-            raise LLMUnavailable(str(e)) from e
+            await self.backend.check_model()
+        except LLMUnavailable as e:
+            health.error("llm", str(e))
+            raise
 
     async def understand(self, text: str, recent_titles: list[dict]) -> Understanding:
         recent = json.dumps([{"key": r["title_key"], "title": r["title"]} for r in recent_titles],

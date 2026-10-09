@@ -189,12 +189,15 @@ function renderStatus() {
       h("dt", {}, T.log_file), h("dd", {}, s.log_file)));
 
   const services = h("div", { class: "services" },
-    ["telegram", "claude", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr"].map(name => {
+    ["telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr"].map(name => {
       const st = s.services[name];
+      const title = name === "llm" && s.llm ? s.llm.name : T["svc_" + name];
+      const untested = name === "llm" && s.llm && !s.llm.recommended
+        ? h("span", { class: "pill warn", title: tr("provider_warn", { name: s.llm.name }) }, T.untested) : null;
       const pillCls = { ok: "ok", error: "error" }[st.status] || "";
       const text = { ok: T.status_ok, error: T.status_error, disabled: T.status_disabled }[st.status] || T.status_unknown;
       return h("div", { class: `service ${pillCls}` },
-        h("div", { class: "row" }, h("h3", {}, T["svc_" + name]), h("span", { class: "spacer" }),
+        h("div", { class: "row" }, h("h3", {}, title), untested, h("span", { class: "spacer" }),
           h("span", { class: `pill ${pillCls}` }, text)),
         h("div", { class: "detail" }, st.detail || "–"),
         h("div", { class: "meta" },
@@ -203,7 +206,8 @@ function renderStatus() {
     }));
 
   box.replaceChildren(botCard, h("div", { id: "version" }),
-    h("h2", { style: "font-size:16px;margin:24px 0 12px" }, T.connections), services);
+    h("h2", { style: "font-size:16px;margin:24px 0 12px" }, T.connections), services,
+    h("p", { class: "disclaimer" }, T.cost_disclaimer));
   renderVersion();
   if (!updateInfo) loadUpdate(false);
 }
@@ -352,7 +356,7 @@ function renderEvents() {
 }
 
 // --- config tab ---------------------------------------------------------------------------
-const GROUPS = ["telegram", "claude", "jellyfin", "jellyseerr", "web", "system"];
+const GROUPS = ["telegram", "llm", "jellyfin", "jellyseerr", "web", "system"];
 
 async function viewConfig(main) {
   const box = h("div", { id: "config" });
@@ -374,22 +378,45 @@ function loadError(retry) {
     h("button", { class: "btn small", onclick: retry }, T.retry));
 }
 
-// --- pickers: Jellyfin accounts and Claude models, loaded live (also with values not saved yet) ---------
-const opts = { models: null, modelsError: "", users: null, usersError: "" };
+// --- language model provider: the selected one decides which fields are shown and used ----------------
+function fieldValue(name) {
+  if (name in dirty) return dirty[name];
+  const f = configData.fields.find(f => f.name === name);
+  return f && !resets.has(name) ? f.value || f.default : (f ? f.default : "");
+}
+const providerId = () => fieldValue("LLM_PROVIDER") || "claude";
+const providerInfo = id => (configData.providers || []).find(p => p.id === id) || { id, name: id, fields: {} };
+
+function providerNotice(id) {
+  const p = providerInfo(id);
+  if (p.recommended) return null;
+  return [h("div", { class: "notice warn" }, tr("provider_warn", { name: p.name })),
+          p.local ? h("div", { class: "notice" }, T.provider_local_hint) : null];
+}
+
+// --- pickers: Jellyfin accounts and models, loaded live (also with values not saved yet) ---------
+const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersError: "" };
 let savedSetting = null;  // behaviour setting that was just saved – shows "✓ saved" next to it
 
 async function loadOptions(which) {
-  const body = which === "models"
-    ? { api_key: dirty.ANTHROPIC_API_KEY || "" }
-    : { url: dirty.JELLYFIN_URL || "", api_key: dirty.JELLYFIN_API_KEY || "" };
+  let body, provider;
+  if (which === "models") {
+    provider = providerId();
+    const pf = providerInfo(provider).fields;
+    body = { provider, api_key: (pf.key && dirty[pf.key]) || "", url: (pf.url && dirty[pf.url]) || "" };
+  } else {
+    body = { url: dirty.JELLYFIN_URL || "", api_key: dirty.JELLYFIN_API_KEY || "" };
+  }
   try {
-    const res = await api(`/api/options/${which === "models" ? "claude-models" : "jellyfin-users"}`, { method: "POST", body });
+    const res = await api(`/api/options/${which === "models" ? "models" : "jellyfin-users"}`, { method: "POST", body });
+    if (which === "models" && provider !== providerId()) return;  // provider changed meanwhile
     opts[which] = res[which] && res[which].length ? res[which] : null;
     opts[which + "Error"] = res.error || "";
   } catch (e) {
     opts[which] = null;
     opts[which + "Error"] = e.message;
   }
+  if (which === "models") opts.modelsFor = provider;
   renderConfig();
 }
 
@@ -401,7 +428,7 @@ const modelInfo = id => (opts.models || []).find(m => m.id === id);
 
 function modelWarning(id) {
   const m = modelInfo(id);
-  if (!m || m.recommended) return null;
+  if (!m || m.recommended || !m.cost) return null;
   const c = m.cost;
   const text = tr("model_warn", { name: m.name, factor: c.factor, cost: fmtUsd(c.per_suggestion),
                                   n: Math.max(1, Math.round(5 / c.per_suggestion)).toLocaleString() });
@@ -409,12 +436,21 @@ function modelWarning(id) {
 }
 
 function pickerInput(f, id, current, onInput) {
-  if (f.name === "CLAUDE_MODEL" && opts.models) {
+  if (f.name === "LLM_PROVIDER") {
+    const options = (configData.providers || []).map(p => h("option", { value: p.id, selected: p.id === current },
+      tr(p.recommended ? "provider_recommended" : "provider_untested", { name: p.name })));
+    return h("select", { id, onchange: e => {
+      onInput(e); opts.models = null; opts.modelsError = ""; renderConfig(); loadOptions("models");
+    } }, options);
+  }
+  if (f.name === providerInfo(providerId()).fields.model && opts.models && opts.modelsFor === providerId()) {
     const ids = opts.models.map(m => m.id);
-    const options = opts.models.map(m => h("option", { value: m.id, selected: m.id === current },
-      m.recommended ? tr("model_option_recommended", { name: m.name, cost: fmtUsd(m.cost.per_suggestion) })
-                    : tr("model_option", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) })));
-    if (current && !ids.includes(current)) options.unshift(h("option", { value: current, selected: true }, current));
+    const label = m => !m.cost ? m.name
+      : m.recommended ? tr("model_option_recommended", { name: m.name, cost: fmtUsd(m.cost.per_suggestion) })
+      : tr("model_option", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) });
+    const options = opts.models.map(m => h("option", { value: m.id, selected: m.id === current }, label(m)));
+    if (!current) options.unshift(h("option", { value: "", selected: true }, "–"));
+    else if (!ids.includes(current)) options.unshift(h("option", { value: current, selected: true }, current));
     return h("select", { id, onchange: e => { onInput(e); renderConfig(); } }, options);
   }
   if (f.name === "JELLYFIN_USER" && opts.users) {
@@ -449,7 +485,8 @@ function renderConfig(message) {
 
   // Connection and system fields: only saved with the button, then the bot restarts.
   const groups = GROUPS.map(g => {
-    const fields = configData.fields.filter(f => f.group === g);
+    // Fields of providers that are not selected stay hidden (and are not used).
+    const fields = configData.fields.filter(f => f.group === g && (!f.provider || f.provider === providerId()));
     return h("div", { class: "group" }, h("h3", {}, T["group_" + g]), fields.map(fieldRow));
   });
   const saveBtn = h("button", { class: "btn primary", id: "savebtn", onclick: e => saveConfig(e.target) }, T.save);
@@ -486,7 +523,9 @@ function fieldRow(f) {
     updateSaveBar();
   };
   // The pickers depend on these – reload them once a new address or key has been typed.
-  const reloads = { ANTHROPIC_API_KEY: "models", JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users" }[f.name];
+  const pf = providerInfo(providerId()).fields;
+  const reloads = f.name === pf.key || f.name === pf.url ? "models"
+    : { JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users" }[f.name];
   if (!f.editable) {
     input = h("input", { type: "text", id, value: f.value, disabled: true });
   } else if ((input = pickerInput(f, id, current, onInput))) {
@@ -512,13 +551,14 @@ function fieldRow(f) {
       resets.add(f.name); delete dirty[f.name]; renderConfig();
     } }, T.reset));
   } else if (f.source === "env") info.push(T.from_env);
-  const pickerError = { CLAUDE_MODEL: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
+  const pickerError = { [pf.model]: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
   if (pickerError && input.tagName !== "SELECT") info.push(tr("options_fallback", { error: pickerError }));
   return h("div", { class: "field" },
     h("label", { for: id }, T["f_" + f.name] || f.name, f.required ? h("span", { class: "req", title: T.required }, " *") : "",
       h("span", { class: "name" }, f.name)),
     h("div", {}, input,
       f.name === "CLAUDE_MODEL" ? modelWarning(current || f.default) : null,
+      f.name === "LLM_PROVIDER" ? providerNotice(current || f.default) : null,
       info.length ? h("div", { class: "info" }, info.map(i => typeof i === "string" ? h("span", {}, i) : i)) : null,
       f.error && !(f.name in dirty) ? h("div", { class: "err" }, f.error) : null));
 }
@@ -535,8 +575,10 @@ async function saveSetting(key, value) {
 }
 
 async function saveConfig(btn) {
-  const m = dirty.CLAUDE_MODEL && modelInfo(dirty.CLAUDE_MODEL);
-  if (m && !m.recommended && !confirm(tr("model_confirm", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) }))) {
+  const p = dirty.LLM_PROVIDER && providerInfo(dirty.LLM_PROVIDER);
+  if (p && !p.recommended && !confirm(tr("provider_confirm", { name: p.name }))) return;
+  const m = providerId() === "claude" && dirty.CLAUDE_MODEL && modelInfo(dirty.CLAUDE_MODEL);
+  if (m && m.cost && !m.recommended && !confirm(tr("model_confirm", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) }))) {
     return;
   }
   btn.disabled = true;

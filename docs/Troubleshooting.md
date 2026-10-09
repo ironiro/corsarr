@@ -32,6 +32,16 @@ and only in the configured group. Every incoming message is listed under Events.
 | `credit balance`, `usage limit` | Monthly limit reached or no credit. Raise it in the Claude Console; the bot comes back on its own. |
 | `not_found_error` for the model | `CLAUDE_MODEL` misspelled. Clear the field to use the default. |
 
+## Other AI providers (untested)
+
+| Message | Cause / fix |
+| --- | --- |
+| `ConnectError` / `Connection refused` (Ollama, LM Studio) | Server not running, or only listening on localhost. Use the machine's IP, not `localhost`, when Corsarr runs in Docker/LXC; for Ollama set `OLLAMA_HOST=0.0.0.0`. |
+| `model … not found` | Model not pulled/downloaded, or misspelled – pick it from the list. |
+| `HTTP 401` / `HTTP 403` | Wrong API key. |
+| `HTTP 429` | Rate limit or no credit left with the provider. |
+| "That didn't work" in the chat, `answer does not match the format` in the events | The model did not return the JSON structure Corsarr needs. Try a larger model, or switch back to Claude. |
+
 ## Jellyfin / Jellyseerr
 
 | Message | Cause / fix |
