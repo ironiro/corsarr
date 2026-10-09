@@ -1,0 +1,89 @@
+# Webhooks
+
+With a webhook, **the other service calls the bot** – not the other way round. That's why Jellyfin, Sonarr
+and Radarr always get the address **of the bot**: `http://<bot-ip>:8787/…`.
+
+All three use the same **webhook secret**. It is generated on first start and shown in the web interface under
+*Configuration → Web server and webhook*:
+
+![The webhook secret in the web interface](images/webhook-secret.jpg)
+
+You can see whether webhooks are arriving under **Status** (one tile per service) and under **Events**.
+
+Tip: give the bot's machine a **static IP**. If its address changes, the webhooks no longer reach it.
+
+## Jellyfin – feedback after watching
+
+Jellyfin reports when playback stops. The bot reads everything else (progress, watched state, whether a season is complete)
+directly from Jellyfin.
+
+1. Dashboard → *Plugins* → *Catalog* → install **Webhook**.
+2. Restart Jellyfin – preferably on the server with `systemctl restart jellyfin`
+   (→ [Troubleshooting](Troubleshooting.md#jellyfin-doesnt-start-after-installing-a-plugin)).
+3. Dashboard → *Plugins* → open **Webhook**.
+   - **Server Url** (at the very top): the address of **Jellyfin** itself, e.g. `http://192.168.1.20:8096`.
+     The plugin only uses it for links in its own messages; it doesn't matter to the bot.
+4. **Add Generic Destination**:
+
+| Field | Value |
+| --- | --- |
+| Webhook Name | `Corsarr` |
+| Webhook Url | `http://<bot-ip>:8787/jellyfin` |
+| Status | Enabled |
+| Notification Type | **Playback Stop** only |
+| User Filter | the shared account |
+| Item Type | **Movies** and **Episodes** |
+| Send All Properties | off |
+
+5. Under *Headers* → *Add Header*: key `X-Corsarr-Secret`, value = the webhook secret.
+6. **Template**:
+
+```json
+{
+  "event": "{{NotificationType}}",
+  "itemId": "{{ItemId}}",
+  "itemType": "{{ItemType}}",
+  "playedToCompletion": "{{PlayedToCompletion}}",
+  "positionTicks": "{{PlaybackPositionTicks}}"
+}
+```
+
+7. Save. **Test:** play something briefly with the shared account and stop it – the Jellyfin webhook tile
+   under Status should turn green. (The bot only asks for feedback after at least 5 minutes of watching.)
+
+## Sonarr and Radarr – download notifications
+
+This replaces any Telegram connections set up in Sonarr and Radarr themselves. Remove those, or every message will arrive
+twice.
+
+In Sonarr or Radarr: *Settings → Connect → **+** → **Webhook***
+
+| Field | Sonarr | Radarr |
+| --- | --- | --- |
+| Name | `Corsarr` | `Corsarr` |
+| Triggers | **On File Import** only | **On File Import** only |
+| URL | `http://<bot-ip>:8787/sonarr?secret=<secret>` | `http://<bot-ip>:8787/radarr?secret=<secret>` |
+| Method | POST | POST |
+| Username / Password / Headers | empty | empty |
+
+Press **Test**, then save. The Sonarr or Radarr tile under Status should turn green.
+
+### What gets reported
+
+| Situation | Message | When |
+| --- | --- | --- |
+| New episode of a running show (aired within the last 7 days) | 📺 Andor (2022): S02E03 “Harvest” is ready | after 2 minutes without new imports – double episodes in one message |
+| Older episodes / whole seasons backfilled | 📦 Grey's Anatomy (2005): 48 episodes from seasons 1–4 are ready | **one** message once nothing new has arrived for 15 minutes |
+| Movie | 🎬 Weapons (2025) is ready – requested via Corsarr 📥 | after 1 minute |
+
+- Quality upgrades are not reported.
+- "requested via Corsarr" is added when the title was requested with the 📥 button.
+- Imports are saved first, so if the bot isn't running, the messages are sent once it starts again.
+- Messages go to the group, or to `NOTIFY_CHAT_ID` if set (→ [Configuration](Configuration.md)).
+- Messages are in the language last used in the group.
+
+## Security
+
+Without a valid secret the bot rejects every call (HTTP 403) and notes it under Events. Jellyfin sends the
+secret in the `X-Corsarr-Secret` header, Sonarr/Radarr in the address (`?secret=`) because that is the
+easiest to enter there. Either method works for all three endpoints.

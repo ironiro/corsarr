@@ -1,0 +1,16 @@
+# Never bake local data or secrets into the image
+.env
+data/
+*.db
+*.db-*
+
+# Development leftovers
+.venv/
+.git/
+.github/
+__pycache__/
+.pytest_cache/
+tests/
+docs/
+deploy/
+*.md

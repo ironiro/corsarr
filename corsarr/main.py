@@ -1,0 +1,230 @@
+"""Entry point: python -m corsarr
+
+The web server (GUI and Jellyfin webhook) always runs. The Telegram bot starts once the
+configuration is complete and can be restarted in-process when it changes in the GUI.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import secrets
+import signal
+import time
+from logging.handlers import RotatingFileHandler
+
+from telegram import Update
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+
+from . import config, web
+from .bot import CorsarrBot
+from .checks import run_checks
+from .db import DB
+from .feedback import FeedbackService
+from .i18n import t
+from .jellyfin import Jellyfin
+from .jellyseerr import Jellyseerr
+from .llm import LLM
+from .monitor import events, health
+from .profile import ProfileBuilder
+from .recommender import Recommender
+
+log = logging.getLogger("corsarr")
+
+HEALTH_INTERVAL = 300  # seconds between automatic connection checks
+
+
+def setup_logging(cfg: config.Config) -> None:
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(cfg.log_level)
+    file_handler = RotatingFileHandler(cfg.log_dir / "corsarr.log", maxBytes=2_000_000, backupCount=5,
+                                       encoding="utf-8")
+    console = logging.StreamHandler()
+    for h in (file_handler, console):
+        h.setFormatter(fmt)
+        root.addHandler(h)
+    root.addHandler(events)
+    # Per-request lines of the HTTP libraries (and the GUI's own polling) would flood the event log.
+    for noisy in ("httpx", "httpx2", "httpcore", "aiohttp.access", "apscheduler"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+def ensure_webhook_secret(cfg: config.Config) -> config.Config:
+    """Nobody has to choose the webhook secret by hand – it only has to match Jellyfin."""
+    if cfg.webhook_secret:
+        return cfg
+    overrides = config.read_overrides(cfg.data_dir)
+    overrides["WEBHOOK_SECRET"] = secrets.token_urlsafe(24)
+    config.write_overrides(cfg.data_dir, overrides)
+    return config.load()
+
+
+def print_setup_hint(cfg: config.Config) -> None:
+    """Console block while the configuration is incomplete: where to set it up."""
+    lines = [t("cli.setup_title"), t("cli.setup_url", url=web.local_url(cfg.webhook_host, cfg.webhook_port))]
+    if cfg.webhook_host in ("0.0.0.0", "::", ""):
+        lines.append(t("cli.setup_lan", port=cfg.webhook_port))
+    lines.append(t("cli.setup_missing"))
+    print("\n" + "\n".join(f"  {line}" for line in lines) + "\n", flush=True)
+
+
+class Runtime:
+    """Owns the configuration, the database and the (re)startable Telegram bot."""
+
+    def __init__(self, cfg: config.Config):
+        self.cfg = cfg
+        self.db = DB(cfg.db_path)
+        self.started_at = time.time()
+        self.state = "stopped"  # 'starting' | 'running' | 'unconfigured' | 'error' | 'stopped'
+        self.state_detail = ""
+        self.app: Application | None = None
+        self.corsarr: CorsarrBot | None = None
+        self.feedback: FeedbackService | None = None
+        self.jellyfin: Jellyfin | None = None
+        self.seerr: Jellyseerr | None = None
+        self.llm: LLM | None = None
+        self._lock = asyncio.Lock()
+
+    # --- lifecycle -------------------------------------------------------------
+    async def start(self) -> None:
+        async with self._lock:
+            await self._start()
+
+    async def stop(self) -> None:
+        async with self._lock:
+            await self._stop()
+
+    async def restart(self) -> None:
+        async with self._lock:
+            await self._stop()
+            self.cfg = config.load()
+            logging.getLogger().setLevel(self.cfg.log_level)
+            await self._start()
+        await self.check()
+
+    async def _start(self) -> None:
+        cfg = self.cfg
+        if not cfg.complete:
+            self.state, self.state_detail = "unconfigured", ", ".join(cfg.errors)
+            log.warning(t("log.config_incomplete", fields=", ".join(cfg.errors)))
+            return
+        self.state, self.state_detail = "starting", ""
+        log.info(t("log.bot_starting"))
+        self.jellyfin = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
+        self.seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
+        self.llm = LLM(cfg.anthropic_api_key, cfg.model)
+        profiles = ProfileBuilder(self.db, self.jellyfin)
+        recommender = Recommender(self.db, self.jellyfin, self.seerr, self.llm, profiles)
+        self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles)
+        self.corsarr = CorsarrBot(cfg, self.db, self.jellyfin, self.seerr, self.llm, recommender, self.feedback)
+        self.feedback.notifier = self.corsarr.ask_feedback
+
+        # Generous timeouts: sending a poster makes Telegram fetch or upload an image first.
+        app = (Application.builder().token(cfg.telegram_token).concurrent_updates(True)
+               .connect_timeout(15).read_timeout(30).write_timeout(30).media_write_timeout(60).build())
+        chat = filters.Chat(chat_id=cfg.chat_id)
+        app.add_handler(MessageHandler(chat & filters.TEXT, self.corsarr.on_message))
+        app.add_handler(CallbackQueryHandler(self.corsarr.on_callback))
+        app.add_error_handler(self._on_error)
+        self.app = app
+        try:
+            await app.initialize()
+            self.corsarr.app = app
+            self.corsarr.bot_id, self.corsarr.username = app.bot.id, app.bot.username
+            await self.corsarr.load_genres()
+            app.job_queue.run_repeating(self.corsarr.job_feedback, interval=600, first=30)
+            app.job_queue.run_repeating(self.corsarr.job_outage, interval=300, first=300)
+            app.job_queue.run_repeating(self.corsarr.job_downloads, interval=60, first=10)
+            await app.start()
+            await app.updater.start_polling(
+                allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=True,
+                error_callback=lambda e: health.error("telegram", f"{type(e).__name__}: {e}"))
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+            log.error(t("log.bot_start_failed", error=detail))
+            health.error("telegram", detail)  # everything in this block talks to Telegram
+            await self._stop()
+            self.state, self.state_detail = "error", detail
+            return
+        health.ok("telegram")
+        self.state = "running"
+        log.info(t("log.signed_in", username=app.bot.username, chat=cfg.chat_id, model=cfg.model,
+                   lang=cfg.language))
+
+    async def _stop(self) -> None:
+        app, was_running = self.app, self.state == "running"
+        self.app = self.corsarr = self.feedback = self.llm = None
+        if app is not None:
+            try:
+                if app.updater and app.updater.running:
+                    await app.updater.stop()
+                if app.running:
+                    await app.stop()
+                await app.shutdown()
+            except Exception:
+                log.exception(t("log.bot_stopped"))
+        for client in (self.jellyfin, self.seerr):
+            if client is not None:
+                await client.close()
+        self.jellyfin = self.seerr = None
+        self.state, self.state_detail = "stopped", ""
+        if was_running:
+            log.info(t("log.bot_stopped"))
+
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        log.error(t("log.telegram_error", error=context.error), exc_info=context.error)
+
+    # --- status ------------------------------------------------------------------
+    async def check(self) -> None:
+        running = self.state == "running"
+        await run_checks(self.cfg, bot=self.app.bot if running and self.app else None,
+                         jellyfin=self.jellyfin if running else None,
+                         seerr=self.seerr if running else None,
+                         llm=self.llm if running else None)
+
+    async def health_loop(self) -> None:
+        while True:
+            try:
+                await self.check()
+            except Exception:
+                log.exception("health check")
+            await asyncio.sleep(HEALTH_INTERVAL)
+
+
+async def amain() -> None:
+    cfg = config.load()
+    setup_logging(cfg)
+    cfg = ensure_webhook_secret(cfg)
+    runtime = Runtime(cfg)
+    web_runner = await web.start(runtime, cfg.webhook_host, cfg.webhook_port)
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):  # Windows: Ctrl+C arrives as KeyboardInterrupt
+            pass
+
+    await runtime.start()
+    if not cfg.complete:
+        print_setup_hint(cfg)
+        log.warning(t("log.setup_needed", url=web.local_url(cfg.webhook_host, cfg.webhook_port)))
+    health_task = asyncio.create_task(runtime.health_loop())
+    try:
+        await stop.wait()
+    finally:
+        health_task.cancel()
+        await runtime.stop()
+        await web_runner.cleanup()
+
+
+def main() -> None:
+    try:
+        asyncio.run(amain())
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
