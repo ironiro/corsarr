@@ -143,6 +143,8 @@ class CorsarrBot:
                        genres=self.llm.requested_genres(und) or "*"))
             if und.intent in ("recommend", "new_only"):
                 await self._recommend(msg, text, und)
+            elif und.intent == "lookup":
+                await self._lookup(msg, text, und)
             elif und.intent == "settings":
                 await self._settings(msg, und)
             elif und.intent == "feedback":
@@ -179,11 +181,21 @@ class CorsarrBot:
         library = sum(1 for c, _ in rec.picks if c.source == "library")
         log.info(t("log.suggested", n=len(rec.picks), library=library))
 
+    async def _lookup(self, msg: Message, text: str, und: Understanding) -> None:
+        rec = await self.recommender.lookup(text, und, self.speaker())
+        if not rec.picks:
+            await self._say_reply(msg, t("sit.lookup_none"), {"request": text, "searched": und.search_queries})
+            return
+        await msg.reply_text(rec.intro)
+        await self._send_carousel(rec.picks)
+
     def _caption(self, c: Candidate, reason: str, note: str = "") -> str:
         kind = t("bot.movie") if c.media_type == "movie" else t("bot.series")
         lines = [f"<b>{html.escape(c.label)}</b>"]
         if c.source == "library":
             lines.append(t("bot.in_library", kind=kind))
+        elif c.source == "pending":
+            lines.append(t("bot.pending", kind=kind))
         else:
             lines.append(t("bot.not_available", kind=kind))
         facts = []
@@ -242,7 +254,7 @@ class CorsarrBot:
         if row["status"] == "suggested":
             if cand.source == "new":
                 buttons.append(InlineKeyboardButton(t("bot.btn_request"), callback_data=f"req:{row['id']}"))
-            else:  # for new titles "request" already is the yes
+            elif cand.source == "library":  # for new titles "request" already is the yes; pending: on its way
                 buttons.append(InlineKeyboardButton(t("bot.btn_accept"), callback_data=f"acc:{row['id']}"))
             buttons.append(InlineKeyboardButton(t("bot.btn_reject"), callback_data=f"rej:{row['id']}"))
         keyboard = [buttons] if buttons else []

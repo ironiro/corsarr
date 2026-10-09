@@ -64,6 +64,22 @@ class Jellyseerr:
                 break
         return found[:want]
 
+    async def search(self, query: str) -> list[Candidate]:
+        """Movies and series for a search term (TMDB search), with what Jellyseerr knows about each:
+        in the library, already requested, or new. People and collections are left out."""
+        data = await self._get("/search", query=query, page=1)
+        found = []
+        for res in data.get("results", []):
+            if res.get("mediaType") not in ("movie", "tv"):
+                continue
+            cand = self._from_result(res, res["mediaType"])
+            status = (res.get("mediaInfo") or {}).get("status", 1)
+            # 4 = partly available (e.g. some seasons), 5 = available; 2/3 = requested/processing
+            cand.source = "library" if status in (4, 5) else "pending" if status in (2, 3) else "new"
+            cand.votes = res.get("voteCount")
+            found.append(cand)
+        return found
+
     def _from_result(self, res: dict, media_type: str) -> Candidate:
         date = res.get("releaseDate") or res.get("firstAirDate") or ""
         return Candidate(

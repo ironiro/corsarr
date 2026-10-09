@@ -384,3 +384,70 @@ def test_feedback_question_always_names_the_title(db):
     text, kwargs = sent[0]
     assert text.startswith("📺 <b>Starfall (2022)</b> · Staffel 1\n\n")
     assert text.endswith("wie war's? &lt;3") and kwargs["parse_mode"] == "HTML"
+
+
+# --- title lookup ("there's a new series with the android Nova") -------------------------------------
+
+class SearchSeerr(FakeSeerr):
+    def __init__(self, by_query):
+        super().__init__()
+        self.by_query, self.queries, self.enriched = by_query, [], []
+
+    async def search(self, query):
+        self.queries.append(query)
+        if query == "broken":
+            raise RuntimeError("HTTP 500")
+        return list(self.by_query.get(query, []))
+
+    async def enrich(self, cands):
+        self.enriched += cands
+
+
+class IdentifyLLM(FakeLLM):
+    async def identify(self, request, cands, speaker):
+        self.seen = cands
+        return Selection(intro="Das ist NovaWatch.", picks=[Pick(id=i, reason="Comic-Serie mit Nova") for i in self.pick_ids])
+
+
+def test_lookup_searches_each_term_and_shows_only_the_meant_hits(db):
+    quest = cand(1, source="new", media_type="tv")
+    nova_show = cand(2, source="library", media_type="tv")
+    other = cand(3, source="new", media_type="movie")
+    seerr = SearchSeerr({"NovaWatch": [quest], "Nova": [nova_show, quest, other]})
+    llm = IdentifyLLM([0, 0, 7])  # a duplicate and an id out of range are ignored
+    rec = Recommender(db, FakeJellyfin(), seerr, llm, ProfileBuilder(db, FakeJellyfin()))
+    und = understanding(intent="lookup", media_types=("tv",))
+    und.search_queries = ["NovaWatch", "Nova", "NovaWatch", "broken"]
+    result = run(rec.lookup("es gibt doch jetzt eine serie mit vision von marvel", und, "normal"))
+    assert seerr.queries == ["NovaWatch", "Nova", "broken"]  # duplicates searched once, a failure is skipped
+    assert [c.key for c in llm.seen] == [quest.key, nova_show.key]  # deduplicated, only series
+    assert [(c.key, r) for c, r in result.picks] == [(quest.key, "Comic-Serie mit Nova")]
+    assert seerr.enriched == [quest] and result.intro == "Das ist NovaWatch."
+
+
+def test_lookup_without_hits_returns_nothing(db):
+    rec = Recommender(db, FakeJellyfin(), SearchSeerr({}), IdentifyLLM([0]), ProfileBuilder(db, FakeJellyfin()))
+    und = understanding(intent="lookup", media_types=())
+    result = run(rec.lookup("der film wo er am ende merkt dass er tot ist", und, "normal"))
+    assert result.picks == []
+
+
+def test_seerr_search_marks_library_requested_and_new():
+    import httpx
+    from corsarr.jellyseerr import Jellyseerr
+
+    def handler(request):
+        assert request.url.path == "/api/v1/search" and request.url.params["query"] == "The Lantern Keeper"
+        return httpx.Response(200, json={"results": [
+            {"id": 900005, "mediaType": "movie", "title": "The Lantern Keeper", "releaseDate": "1999-08-06",
+             "overview": "x", "voteCount": 12000, "mediaInfo": {"status": 5}},
+            {"id": 1, "mediaType": "tv", "name": "Lantern Keeper Show", "firstAirDate": "2020-01-01", "mediaInfo": {"status": 3}},
+            {"id": 2, "mediaType": "movie", "title": "Other", "releaseDate": ""},
+            {"id": 3, "mediaType": "person", "name": "M. Night Shyamalan"},
+        ]})
+    seerr = Jellyseerr("http://seerr:5055", "k")
+    seerr.http = httpx.AsyncClient(base_url="http://seerr:5055/api/v1", transport=httpx.MockTransport(handler))
+    hits = run(seerr.search("The Lantern Keeper"))
+    assert [(c.title, c.year, c.source) for c in hits] == [
+        ("The Lantern Keeper", 1999, "library"), ("Lantern Keeper Show", 2020, "pending"), ("Other", None, "new")]
+    assert hits[0].votes == 12000
