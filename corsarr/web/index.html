@@ -10,8 +10,8 @@
     // Apply the chosen skin before the first paint (no flash of the default look); app.js switches it.
     try {
       const skin = localStorage.getItem("corsarr.skin");
-      document.documentElement.dataset.skin = ["arr", "terminal", "vhs", "soft"].includes(skin) ? skin : "arr";
-    } catch (e) { document.documentElement.dataset.skin = "arr"; }
+      document.documentElement.dataset.skin = ["arr", "terminal", "vhs", "soft"].includes(skin) ? skin : "vhs";
+    } catch (e) { document.documentElement.dataset.skin = "vhs"; }
   </script>
 </head>
 <body>

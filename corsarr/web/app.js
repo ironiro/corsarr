@@ -69,10 +69,11 @@ function clearTimers() { timers.forEach(clearInterval); timers = []; }
 // --- skins: one DOM, the look comes from style.css scoped by <html data-skin="…"> ---------------
 // index.html applies the stored skin before the first paint; this only switches and remembers it.
 const SKINS = ["arr", "terminal", "vhs", "soft"];
+const DEFAULT_SKIN = "vhs";  // also in index.html
 const currentSkin = () => document.documentElement.dataset.skin;
 
 function setSkin(name) {
-  document.documentElement.dataset.skin = SKINS.includes(name) ? name : SKINS[0];
+  document.documentElement.dataset.skin = SKINS.includes(name) ? name : DEFAULT_SKIN;
   try { localStorage.setItem("corsarr.skin", currentSkin()); } catch (e) { /* storage blocked: this page only */ }
 }
 
@@ -920,19 +921,31 @@ function stepWebhooks() {
     h("details", {}, h("summary", {}, T.wiz_template), h("pre", { class: "log-tail" }, w.template), copyButton(w.template)));
   for (const kind of ["sonarr", "radarr"]) {
     const name = kind[0].toUpperCase() + kind.slice(1);
-    const a = wiz.arr[kind] || (wiz.arr[kind] = { url: "", key: "" });
+    const KIND = kind.toUpperCase();
+    const saved = field(KIND + "_API_KEY").is_set;
+    // Remembered access (if any) fills the form; an empty key field then means "the saved key".
+    const a = wiz.arr[kind] || (wiz.arr[kind] = { url: field(KIND + "_URL").value || "", key: "", remember: saved });
     const connect = async () => {
       if (!confirm(tr("wiz_arr_confirm", { name }))) return;
       const res = await wizCall("/api/setup/arr", { kind, url: a.url, api_key: a.key, base: w.jellyfin.replace(/\/jellyfin$/, "") });
-      if (res) { a.done = res; renderSetup(); }
+      if (!res) return;
+      a.done = res;
+      if (a.remember) {  // takes effect without restarting the bot
+        const values = { [KIND + "_URL"]: a.url };
+        if (a.key) values[KIND + "_API_KEY"] = a.key;
+        configData = await api("/api/config", { method: "PUT", body: { values, reset: [] } }).catch(() => configData);
+      }
+      renderSetup();
     };
     body.push(h("h3", {}, name, " ", hookState(kind)),
       h("p", { class: "hint" }, tr("wiz_arr_intro", { name })),
       h("div", { class: "row wrap" },
         h("input", { placeholder: tr("wiz_arr_url", { name }), value: a.url, oninput: e => { a.url = e.target.value.trim(); } }),
-        h("input", { type: "password", placeholder: T.wiz_arr_key, value: a.key, autocomplete: "new-password",
-                     oninput: e => { a.key = e.target.value.trim(); } }),
+        h("input", { type: "password", placeholder: saved ? T.secret_set : T.wiz_arr_key, value: a.key,
+                     autocomplete: "new-password", oninput: e => { a.key = e.target.value.trim(); } }),
         h("button", { class: "btn", disabled: wiz.busy, onclick: connect }, tr("wiz_arr_connect", { name }))),
+      h("label", { class: "switch" }, h("input", { type: "checkbox", checked: a.remember,
+        onchange: e => { a.remember = e.target.checked; } }), tr("wiz_arr_remember", { name })),
       a.done ? h("div", { class: "notice ok" }, tr("wiz_arr_done", { name })) : null,
       a.done?.telegram?.length ? h("div", { class: "notice warn" }, tr("wiz_arr_telegram", { name, names: a.done.telegram.join(", ") })) : null,
       h("details", {}, h("summary", {}, T.wiz_manual), copyRow("URL", w[kind])));
@@ -1010,7 +1023,8 @@ function renderSetup() {
 // --- backup tab ------------------------------------------------------------------------------
 // Credentials a backup holds: every secret that is set, plus the webhook secret (see backup.create).
 const CREDENTIALS = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-                     "JELLYFIN_API_KEY", "JELLYSEERR_API_KEY", "WEBHOOK_SECRET", "ADMIN_PASSWORD"];
+                     "JELLYFIN_API_KEY", "JELLYSEERR_API_KEY", "SONARR_API_KEY", "RADARR_API_KEY",
+                     "WEBHOOK_SECRET", "ADMIN_PASSWORD"];
 
 async function viewBackup(main) {
   try {
@@ -1059,7 +1073,7 @@ async function viewBackup(main) {
 
 // --- start ---------------------------------------------------------------------------------
 (async () => {
-  if (!SKINS.includes(currentSkin())) document.documentElement.dataset.skin = SKINS[0];
+  if (!SKINS.includes(currentSkin())) document.documentElement.dataset.skin = DEFAULT_SKIN;
   await loadTexts();
   try {
     const first = await api("/api/status");

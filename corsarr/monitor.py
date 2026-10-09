@@ -20,6 +20,7 @@ class ServiceState:
     detail: str = ""
     checked_at: float | None = None
     last_ok: float | None = None
+    event: str = ""  # webhooks: the last event that arrived, e.g. "last: Download"
 
 
 def describe_error(exc: BaseException) -> str:

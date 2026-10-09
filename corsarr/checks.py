@@ -6,6 +6,7 @@ from typing import Awaitable, Callable
 
 from telegram import Bot
 
+from . import setup
 from .config import PROVIDER_FIELDS, Config
 from .i18n import t
 from .jellyfin import Jellyfin
@@ -32,12 +33,13 @@ def configured(cfg: Config, service: str) -> bool:
 
 async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin | None = None,
                      seerr: Jellyseerr | None = None, llm: LLM | None = None,
-                     ping: bool = False) -> dict[str, tuple[bool, str]]:
+                     ping: bool = False, send_tests: bool = False) -> dict[str, tuple[bool, str]]:
     """Check every configured service, update the shared health state and return {service: (ok, detail)}.
 
     Clients of a running bot can be passed in; missing ones are created for the check and closed again.
     `ping=True` makes the language model generate a token (detects a reached spending limit, costs a fraction of a cent);
-    otherwise only key and model are verified, which is free.
+    otherwise only key and model are verified, which is free. `send_tests=True` (the "Check now" button)
+    also lets Sonarr/Radarr send their test event to Corsarr.
     """
     own: list[Callable[[], Awaitable[None]]] = []
     if jellyfin is None and configured(cfg, "jellyfin"):
@@ -102,10 +104,39 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
         for close in own:
             await close()
 
-    for hook, never in (("webhook", "check.webhook_never"), ("sonarr", "check.arr_never"),
-                        ("radarr", "check.arr_never")):
-        if "WEBHOOK_SECRET" in cfg.errors:
-            health.disabled(hook, t("check.not_configured"))
-        elif health.services[hook].status == "unknown":
-            health.services[hook].detail = t(never)
+    await asyncio.gather(*(_check_hook(cfg, hook, send_tests) for hook in ("webhook", "sonarr", "radarr")))
     return {name: results[name] for name in steps}
+
+
+async def _check_hook(cfg: Config, hook: str, send_test: bool) -> None:
+    """The senders of webhooks: Jellyfin's plugin (with the Jellyfin key Corsarr has), Sonarr/Radarr only
+    when their access was saved. Without that, the tile only knows when the last event arrived."""
+    if "WEBHOOK_SECRET" in cfg.errors:
+        health.disabled(hook, t("check.not_configured"))
+        return
+    state = health.services[hook]
+    try:
+        if hook == "webhook":
+            if not configured(cfg, "jellyfin"):
+                raise LookupError
+            version = await asyncio.wait_for(
+                setup.check_jellyfin_hook(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.webhook_secret), timeout=30)
+            detail = t("check.jf_hook_ok", version=version)
+        else:
+            url, key = cfg.get(f"{hook.upper()}_URL"), cfg.get(f"{hook.upper()}_API_KEY")
+            if not (url and key):
+                raise LookupError
+            version = await asyncio.wait_for(
+                setup.check_arr(hook, url, key, cfg.webhook_secret, send_test=send_test), timeout=40)
+            detail = t("check.arr_tested" if send_test else "check.arr_ok", version=version)
+    except LookupError:  # nothing to check actively
+        if state.status == "unknown":
+            state.detail = t("check.webhook_never" if hook == "webhook" else "check.arr_never")
+        return
+    except setup.SetupError as e:
+        health.error(hook, t(e.key, **e.values))
+        return
+    except Exception as e:  # e.g. timeout – reported, never aborts the other checks
+        health.error(hook, describe_error(e))
+        return
+    health.ok(hook, f"{detail} · {state.event}" if state.event else detail)

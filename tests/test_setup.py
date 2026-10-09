@@ -100,3 +100,120 @@ def test_webhook_urls_carry_the_secret():
     urls = setup.webhook_urls("http://192.0.2.5:8787/", "s3cret")
     assert urls["jellyfin"] == "http://192.0.2.5:8787/jellyfin"
     assert urls["sonarr"] == "http://192.0.2.5:8787/sonarr?secret=s3cret" and "{{ItemId}}" in urls["template"]
+
+
+# --- status checks of the webhook senders ---------------------------------------------------------
+
+def jellyfin_server(plugins, conf):
+    def handler(request):
+        if request.url.path == "/Plugins":
+            return httpx.Response(200, json=plugins)
+        return httpx.Response(200, json=conf)
+    return handler
+
+
+WEBHOOK_PLUGIN = [{"Name": "Webhook", "Id": "abc", "Version": "18.0.0.0"}]
+
+
+def dest(uri="http://corsarr:8787/jellyfin", secret="s", types=("PlaybackStop",), **extra):
+    return {"WebhookUri": uri, "NotificationTypes": list(types),
+            "Headers": [{"Key": "X-Corsarr-Secret", "Value": secret}], **extra}
+
+
+@pytest.mark.parametrize("plugins,conf,key", [
+    ([{"Name": "Other", "Id": "x"}], {}, "check.jf_plugin_missing"),
+    (WEBHOOK_PLUGIN, {"GenericOptions": [dest(uri="http://elsewhere/hook")]}, "check.jf_hook_missing"),
+    (WEBHOOK_PLUGIN, {"GenericOptions": [dest(secret="old")]}, "check.jf_hook_secret"),
+    (WEBHOOK_PLUGIN, {"GenericOptions": [dest(types=("ItemAdded",))]}, "check.jf_hook_type"),
+    (WEBHOOK_PLUGIN, {"GenericOptions": [dest(EnableWebhook=False)]}, "check.jf_hook_disabled"),
+])
+def test_jellyfin_hook_problems_are_named(plugins, conf, key):
+    with pytest.raises(setup.SetupError) as e:
+        run(lambda c: setup.check_jellyfin_hook("http://jf:8096", "k", "s", client=c), jellyfin_server(plugins, conf))
+    assert e.value.key == key
+
+
+def test_jellyfin_hook_ok():
+    conf = {"GenericOptions": [dest(uri="http://elsewhere/x"), dest()]}
+    version = run(lambda c: setup.check_jellyfin_hook("http://jf:8096", "k", "s", client=c),
+                  jellyfin_server(WEBHOOK_PLUGIN, conf))
+    assert version == "18.0.0.0"
+
+
+def arr_status_server(hooks, tested, test_status=200):
+    def handler(request):
+        if request.headers.get("X-Api-Key") != "arrkey":
+            return httpx.Response(401)
+        path = request.url.path
+        if path.endswith("/system/status"):
+            return httpx.Response(200, json={"version": "5.2.0"})
+        if path.endswith("/notification/test"):
+            tested.append(json.loads(request.content)["name"])
+            return httpx.Response(test_status, json=[{"errorMessage": "Connection refused"}])
+        return httpx.Response(200, json=hooks)
+    return handler
+
+
+OUR_HOOK = {"id": 4, "name": "Corsarr", "implementation": "Webhook", "enable": True, "onDownload": True,
+            "fields": [{"name": "url", "value": "http://corsarr:8787/radarr?secret=s"}]}
+
+
+def test_arr_check_finds_the_webhook_and_sends_a_test_only_when_asked():
+    tested = []
+    check = lambda send: (lambda c: setup.check_arr("radarr", "http://radarr:7878", "arrkey", "s", send_test=send, client=c))
+    assert run(check(False), arr_status_server([OUR_HOOK], tested)) == "5.2.0" and tested == []
+    run(check(True), arr_status_server([OUR_HOOK], tested))
+    assert tested == ["Corsarr"]
+
+
+@pytest.mark.parametrize("hooks,status,key", [
+    ([], 200, "check.arr_hook_missing"),
+    ([{**OUR_HOOK, "fields": [{"name": "url", "value": "http://corsarr:8787/radarr?secret=old"}]}], 200, "check.arr_hook_missing"),
+    ([{**OUR_HOOK, "onDownload": False}], 200, "check.arr_hook_disabled"),
+    ([OUR_HOOK], 400, "check.arr_test_failed"),
+])
+def test_arr_check_problems(hooks, status, key):
+    with pytest.raises(setup.SetupError) as e:
+        run(lambda c: setup.check_arr("radarr", "http://radarr:7878", "arrkey", "s", send_test=True, client=c),
+            arr_status_server(hooks, [], test_status=status))
+    assert e.value.key == key
+
+
+def test_status_tiles_check_actively_only_with_saved_access(tmp_path, monkeypatch):
+    from corsarr import checks, config, i18n
+    from corsarr.monitor import health
+    for f in config.FIELDS:
+        monkeypatch.delenv(f.name, raising=False)
+    monkeypatch.setenv("CORSARR_ENV_FILE", str(tmp_path / "none.env"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("WEBHOOK_SECRET", "s")
+    monkeypatch.setenv("LANGUAGE", "en")
+    calls = []
+
+    async def fake_check(kind, url, key, secret, send_test=False):
+        calls.append((kind, send_test))
+        if kind == "sonarr":
+            raise setup.SetupError("check.arr_hook_missing")
+        return "5.2.0"
+    monkeypatch.setattr(setup, "check_arr", fake_check)
+    health.reset()
+    try:
+        cfg = config.load()
+        asyncio.run(checks._check_hook(cfg, "radarr", True))
+        assert calls == [] and health.services["radarr"].status == "unknown"
+        assert "Remember" not in health.services["radarr"].detail and "Setup" in health.services["radarr"].detail
+
+        for k, v in {"SONARR_URL": "http://sonarr:8989", "SONARR_API_KEY": "k",
+                     "RADARR_URL": "http://radarr:7878", "RADARR_API_KEY": "k"}.items():
+            monkeypatch.setenv(k, v)
+        cfg = config.load()
+        health.services["radarr"].event = "last: Download"
+        asyncio.run(checks._check_hook(cfg, "radarr", True))
+        asyncio.run(checks._check_hook(cfg, "sonarr", False))
+        assert calls == [("radarr", True), ("sonarr", False)]
+        assert health.services["radarr"].status == "ok"
+        assert health.services["radarr"].detail == "version 5.2.0, test event sent to Corsarr · last: Download"
+        assert health.services["sonarr"].status == "error" and "No Corsarr webhook" in health.services["sonarr"].detail
+    finally:
+        health.reset()
+        i18n.set_language("de")
