@@ -1,5 +1,10 @@
 # Setup
 
+> **Easiest way:** open the web interface. On a new installation it starts with the **setup assistant**
+> (tab *Setup*): it checks your bot token, finds your Telegram group by itself once you write something there,
+> tests each connection before saving it, and can create the webhooks in Sonarr and Radarr for you. You can
+> run it again at any time, e.g. after deleting a webhook. The sections below explain the same steps by hand.
+
 After [installation](Installation.md), only the web interface is running at first. Its **Status** page shows
 what is still missing. This page explains where each value comes from.
 

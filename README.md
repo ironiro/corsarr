@@ -20,8 +20,9 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
   free text like "too gory" as *less: gore*.
 - **Download notifications:** new episodes one by one, backfilled seasons as a single message
   ("📦 Grey's Anatomy: 48 episodes from seasons 1–4 are ready").
-- **Web interface** on port 8787: connection status of every service, live event log, full configuration.
-  No config file needed.
+- **Web interface** on port 8787: a **setup assistant** (finds your Telegram group by itself, tests every
+  connection, creates the Sonarr/Radarr webhooks), connection status, live event log, configuration,
+  encrypted **backup and restore**, and four designs to choose from. No config file needed.
 - **Language model:** Claude (recommended and tested). OpenAI (ChatGPT), Google Gemini, Ollama and LM Studio
   are available as alternatives but **not tested** – suggestions may be worse or fail. See
   [Configuration](docs/Configuration.md#language-model-ai-provider).

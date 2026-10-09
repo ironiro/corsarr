@@ -75,7 +75,16 @@ The database is upgraded automatically on start. Settings are kept.
 
 ## Backup
 
-It is enough to back up the data directory – most importantly `corsarr.db` and `config.json`.
+**In the web interface (tab *Backup*):** download an encrypted zip with all settings (API keys included),
+ratings and the learned taste. It needs a password for the web interface (`ADMIN_PASSWORD`), because the file
+holds the API keys, and you choose a separate password for the zip itself. To restore – also on a fresh
+installation on another machine – upload the zip there and enter that password (on a fresh installation the
+setup assistant offers this as the first step). Backups from older versions are taken over; a backup from a
+newer version is refused until you update. The data being replaced is kept in `backups/pre-restore-…`.
+The zip uses AES encryption, which macOS's Archive Utility cannot open (7-Zip, Keka and `7z` can) – Corsarr
+itself doesn't need that.
+
+**By hand:** it is enough to back up the data directory – most importantly `corsarr.db` and `config.json`.
 
 ```bash
 # LXC – while running, consistent thanks to SQLite's backup (once: apt install sqlite3)

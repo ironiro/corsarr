@@ -110,6 +110,10 @@ With both characters off, the bot writes in a plain, neutral style.
 
 ## The web interface
 
+Pick one of four looks with the **Design** menu (*arr*, *Terminal*, *Video store*, *Friendly*); the choice is
+remembered in your browser. Besides Status, Events and Configuration there are **Setup** (the setup assistant,
+including the webhooks for Jellyfin, Sonarr and Radarr) and **Backup** (download and restore).
+
 `http://<bot-ip>:8787/`
 
 ![Status: the bot and every connection at a glance](images/status.jpg)
