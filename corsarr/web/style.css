@@ -762,3 +762,5 @@ summary { cursor: pointer; color: var(--muted); }
   .copyrow { grid-template-columns: minmax(0, 1fr) auto; }
   .copyrow > span:first-child { grid-column: 1 / -1; }
 }
+#version .btn.primary { margin-top: 12px; }
+.release summary { margin-top: 0; }

@@ -75,8 +75,10 @@ The database is upgraded automatically on start. Settings are kept.
 
 ## Backup
 
-**In the web interface (tab *Backup*):** download an encrypted zip with all settings (API keys included),
-ratings and the learned taste. It needs a password for the web interface (`ADMIN_PASSWORD`), because the file
+**In the web interface (tab *Backup*):** download an encrypted zip with all settings, ratings and the learned
+taste. It contains the credentials that are set – Telegram bot token, the AI provider's API key, the Jellyfin and
+Jellyseerr API keys, the webhook secret and the web interface password – but not the Sonarr/Radarr API keys,
+which Corsarr never saves. It needs a password for the web interface (`ADMIN_PASSWORD`), because the file
 holds the API keys, and you choose a separate password for the zip itself. To restore – also on a fresh
 installation on another machine – upload the zip there and enter that password (on a fresh installation the
 setup assistant offers this as the first step). Backups from older versions are taken over; a backup from a

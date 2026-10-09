@@ -295,12 +295,15 @@ function renderVersion() {
       rows.push(h("ul", { class: "changes" }, u.commits.map(c =>
         h("li", {}, h("code", {}, short(c.sha)), " ", c.message, h("span", { class: "muted" }, " · " + c.date.slice(0, 10))))));
     }
-    for (const r of u.releases) {
-      const title = [r.name, r.prerelease ? h("span", { class: "pill warn" }, "beta") : "",
-        r.date ? h("span", { class: "muted" }, " · " + r.date.slice(0, 10)) : ""];
-      // Notes only exist when a GitHub release was written for the tag
-      rows.push(r.notes ? h("details", { class: "release", open: r === u.releases[0] },
-        h("summary", {}, title), h("pre", { class: "notes" }, r.notes)) : h("div", { class: "release" }, title));
+    // The new versions – only worth a list when there is more than the one already named in the pill,
+    // or when a GitHub release was written for it (notes).
+    if (u.releases.length > 1 || u.releases.some(r => r.notes)) {
+      rows.push(h("ul", { class: "changes releases" }, u.releases.map(r => {
+        const title = [h("code", {}, r.name), r.prerelease ? h("span", { class: "muted" }, " · " + T.prerelease) : "",
+          r.date ? h("span", { class: "muted" }, " · " + r.date.slice(0, 10)) : ""];
+        return h("li", {}, r.notes ? h("details", { class: "release", open: r === u.releases[0] },
+          h("summary", {}, title), h("pre", { class: "notes" }, r.notes)) : title);
+      })));
     }
     if (u.kind === "service") {
       rows.push(h("button", { class: "btn primary", onclick: startUpdate }, T.update_now));
@@ -966,7 +969,21 @@ function renderSetup() {
 }
 
 // --- backup tab ------------------------------------------------------------------------------
-function viewBackup(main) {
+// Credentials a backup holds: every secret that is set, plus the webhook secret (see backup.create).
+const CREDENTIALS = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+                     "JELLYFIN_API_KEY", "JELLYSEERR_API_KEY", "WEBHOOK_SECRET", "ADMIN_PASSWORD"];
+
+async function viewBackup(main) {
+  try {
+    configData = await api("/api/config");
+  } catch (e) {
+    if (e.message !== "unauthorized") renderNetworkError();
+    return;
+  }
+  const included = CREDENTIALS.filter(n => configData.fields.find(f => f.name === n)?.is_set).map(n => T["cred_" + n]);
+  const contents = h("ul", { class: "hint" },
+    h("li", {}, included.length ? tr("backup_contains", { list: included.join(", ") }) : T.backup_contains_none),
+    h("li", {}, T.backup_not_contained));
   const pw = h("input", { type: "password", autocomplete: "new-password", placeholder: T.backup_pw });
   const pw2 = h("input", { type: "password", autocomplete: "new-password", placeholder: T.backup_pw2 });
   const msg = h("div", {});
@@ -993,7 +1010,7 @@ function viewBackup(main) {
   } }, T.backup_download);
   const canBackup = status?.auth;
   main.append(
-    h("div", { class: "card" }, h("h2", {}, T.backup_title), h("p", {}, T.backup_intro),
+    h("div", { class: "card" }, h("h2", {}, T.backup_title), h("p", {}, T.backup_intro), contents,
       canBackup ? [h("div", { class: "field" }, h("label", {}, T.backup_pw), pw),
                    h("div", { class: "field" }, h("label", {}, T.backup_pw2), pw2), download, msg]
         : h("div", { class: "notice warn" }, T.backup_needs_pw, " ",
