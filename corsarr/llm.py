@@ -17,6 +17,48 @@ from .models import Candidate
 log = logging.getLogger(__name__)
 
 
+RECOMMENDED_MODEL = "claude-haiku-5-5"
+# $ per million input / output tokens (Anthropic list prices, October 2026). Only these models are offered
+# in the picker: each supports what the bot sends (effort, structured outputs). Older ones (e.g. Haiku 4.5)
+# reject the effort setting.
+MODEL_PRICES = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-fable-5": (10.00, 50.00),
+}
+SUGGESTION_COST_HAIKU = 0.002  # $ per suggestion request, measured on real use with Claude Haiku 5.5
+
+
+def model_cost(model_id: str) -> dict | None:
+    """Price and how many times more expensive than the recommended model."""
+    if model_id not in MODEL_PRICES:
+        return None
+    inp, out = MODEL_PRICES[model_id]
+    factor = round(out / MODEL_PRICES[RECOMMENDED_MODEL][1])
+    return {"input": inp, "output": out, "factor": factor,
+            "per_suggestion": round(SUGGESTION_COST_HAIKU * factor, 4)}
+
+
+async def available_models(api_key: str) -> list[dict]:
+    """Supported Claude models this API key may use, recommended first, then cheapest first."""
+    client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=1, timeout=15)
+    models = []
+    async for m in client.models.list():
+        if m.id in MODEL_PRICES:
+            models.append({"id": m.id, "name": m.display_name, "cost": model_cost(m.id),
+                           "recommended": m.id == RECOMMENDED_MODEL})
+    models.sort(key=lambda m: (not m["recommended"], m["cost"]["factor"]))
+    return models
+
+
 class LLMUnavailable(Exception):
     """API unreachable or spend limit reached – the bot goes into outage mode."""
 

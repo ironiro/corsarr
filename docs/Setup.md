@@ -48,7 +48,8 @@ and checks every 5 minutes whether the API is available again. Once it is, the b
 ## 3. Jellyfin
 
 - **API key:** Jellyfin dashboard → *API Keys* → **+** → name e.g. `Corsarr`.
-- **Account:** the name of the shared Jellyfin user you all watch with (e.g. `LivingRoom`). From this account the bot
+- **Account:** the shared Jellyfin user you all watch with (e.g. `LivingRoom`) – once address and API key
+  are entered, the web interface offers the existing accounts to pick from. From this account the bot
   reads what you watched, what you started and what your favourites (♥) are.
 - **Address:** e.g. `http://192.168.1.20:8096` – the address the bot uses to reach the server on your network.
 

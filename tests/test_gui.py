@@ -257,3 +257,51 @@ def test_update_api_only_triggers_on_service_installs(env, tmp_path, monkeypatch
         assert (await client.post("/api/update", headers=H)).status == 200 and trigger.exists()
         assert (await (await client.get("/api/update")).json())["updating"] is True
     with_client(test)
+
+
+def test_jellyfin_user_picker_reads_accounts_with_unsaved_values(env):
+    from aiohttp import web as aioweb
+    seen = []
+
+    async def users(request):
+        seen.append(request.headers.get("Authorization", ""))
+        return aioweb.json_response([{"Name": "LivingRoom"}, {"Name": "Kids"}])
+
+    async def test(client, rt):
+        fake = aioweb.Application()
+        fake.router.add_get("/Users", users)
+        jf = TestServer(fake)
+        await jf.start_server()
+        try:
+            await login(client)
+            r = await client.post("/api/options/jellyfin-users", headers=H,
+                                  json={"url": str(jf.make_url("")), "api_key": "typed-key"})
+            assert (await r.json()) == {"users": ["Kids", "LivingRoom"], "error": ""}
+            assert 'Token="typed-key"' in seen[0]  # the key typed into the form, not the saved one
+        finally:
+            await jf.close()
+        bad = await (await client.post("/api/options/jellyfin-users", headers=H,
+                                       json={"url": "http://127.0.0.1:9", "api_key": "x"})).json()
+        assert bad["users"] == [] and bad["error"]  # the form falls back to a text field
+    with_client(test)
+
+
+def test_claude_model_picker_marks_haiku_and_prices(env, monkeypatch):
+    from corsarr import llm
+    used = []
+
+    async def fake_models(key):
+        used.append(key)
+        return [{"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "recommended": True,
+                 "cost": llm.model_cost("claude-haiku-5-5")},
+                {"id": "claude-fable-5-1", "name": "Claude Fable 5.1", "recommended": False,
+                 "cost": llm.model_cost("claude-fable-5-1")}]
+    monkeypatch.setattr(llm, "available_models", fake_models)
+
+    async def test(client, rt):
+        await login(client)
+        res = await (await client.post("/api/options/claude-models", headers=H, json={})).json()
+        assert used == ["sk-test"] and res["recommended"] == "claude-haiku-5-5"
+        fable = res["models"][1]["cost"]
+        assert fable["factor"] == 100 and fable["per_suggestion"] == 0.2
+    with_client(test)
