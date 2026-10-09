@@ -61,8 +61,8 @@ twice.
 **Automatically:** in *Setup → Webhooks* enter the address and API key of Sonarr or Radarr (*Settings →
 General*) and click *Set up in Sonarr* / *Set up in Radarr*. Corsarr creates a webhook named `Corsarr` with
 the settings below, or updates it if one already exists, and Sonarr/Radarr test it while saving. The address
-and API key are only used for this and are **not saved** (so they are not in backups either). The assistant
-also warns if a Telegram connection is still set up there.
+and API key are only saved if you tick **Remember access** (they are then also in backups); otherwise they
+are used for this one step only. The assistant also warns if a Telegram connection is still set up there.
 
 **By hand:** in Sonarr or Radarr: *Settings → Connect → **+** → **Webhook***
 
@@ -89,6 +89,19 @@ Press **Test**, then save. The Sonarr or Radarr tile under Status should turn gr
 - Imports are saved first, so if the bot isn't running, the messages are sent once it starts again.
 - Messages go to the group, or to `NOTIFY_CHAT_ID` if set (→ [Configuration](Configuration.md)).
 - Messages are in the language last used in the group.
+
+## Status checks
+
+The tiles under **Status** show whether events arrive. Beyond that, Corsarr checks the senders actively where
+it can:
+
+| Tile | What is checked | Needs |
+| --- | --- | --- |
+| Jellyfin webhook | The Webhook plugin is installed and a destination points at `…/jellyfin` with the right secret, is enabled and has *Playback Stop* selected | nothing extra – the Jellyfin API key Corsarr has anyway |
+| Sonarr / Radarr | The service is reachable and the key valid, and the `Corsarr` webhook with the current secret exists and has *On File Import* on. **Check now** also lets the service send its test event to Corsarr, which checks the whole way back | the access remembered in *Setup → Webhooks* (*Remember access*) |
+
+Without remembered access, the Sonarr and Radarr tiles only show when the last event arrived. The automatic
+check every 5 minutes never sends test events – only the **Check now** button does.
 
 ## Security
 

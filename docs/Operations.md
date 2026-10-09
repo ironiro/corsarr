@@ -90,8 +90,8 @@ The **Backup** tab downloads an AES-encrypted zip with all settings, ratings and
   interface's. Downloading requires a web interface password (`ADMIN_PASSWORD`), because the file contains
   credentials.
 - **Contents:** the credentials that are set – Telegram bot token, the AI provider's API key, the Jellyfin and
-  Jellyseerr API keys, the webhook secret and the web interface password. The page lists which ones are
-  included. Sonarr/Radarr API keys are **not** included; Corsarr never saves them.
+  Jellyseerr API keys, the webhook secret and the web interface password – and the Sonarr/Radarr API keys
+  only if you chose *Remember access* for them. The page lists which ones are included.
 - **Restore:** upload the zip and enter its password – also on a fresh installation on another machine, where
   the setup assistant offers *Restore a backup* as the first step and no login is needed. The data being
   replaced is moved to `backups/pre-restore-…` in the data directory, and the bot restarts.

@@ -75,6 +75,10 @@ If the tile stays at "unknown":
 - Check reachability from the service's machine: `curl http://<bot-ip>:8787/health` must return `ok`.
 - Jellyfin: *Playback Stop* ticked? Correct account in the user filter? Destination saved?
 
+The active checks name what is wrong, e.g. "No destination in the Webhook plugin points at Corsarr",
+"“Playback Stop” is not selected", "No Corsarr webhook with the current secret found" or "The test doesn't
+reach Corsarr" (Sonarr/Radarr can't reach Corsarr's address – check IP, port and firewall).
+
 If the tile turns red and shows "wrong secret", copy the address or secret again from *Setup → Webhooks*.
 For Sonarr and Radarr, *Set up in Sonarr* / *Set up in Radarr* there rewrites the webhook with the correct
 values.

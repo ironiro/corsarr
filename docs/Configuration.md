@@ -83,6 +83,8 @@ Jellyseerr has been merged into Seerr; Seerr and Overseerr use the same API and 
 | Name | Required | Meaning |
 | --- | --- | --- |
 | `WEBHOOK_SECRET` | yes* | Shared secret for Jellyfin, Sonarr and Radarr. *Generated automatically on first start. The ready-made webhook addresses are under Setup → Webhooks. |
+| `SONARR_URL`, `SONARR_API_KEY` | – | Optional. Only for the active [status check](Webhooks.md#status-checks) of Sonarr; set by *Remember access* in the setup assistant. |
+| `RADARR_URL`, `RADARR_API_KEY` | – | The same for Radarr. |
 
 ### Interface and updates
 
