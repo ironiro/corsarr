@@ -96,7 +96,10 @@ class FeedbackIntent(BaseModel):
 
 class Understanding(BaseModel):
     language: str = Field("en", description="ISO 639-1 code of the language the message is written in, e.g. de, en")
-    intent: Literal["recommend", "new_only", "settings", "feedback", "chat"]
+    intent: Literal["recommend", "new_only", "lookup", "settings", "feedback", "chat"]
+    search_queries: list[str] = Field(default_factory=list, description=(
+        "lookup only: 1–4 TMDB search terms – your best guess of the exact title first, then short keyword "
+        "combinations from the message"))
     media_types: list[Literal["movie", "tv"]] = Field(description="empty = movies and series")
     jellyfin_genres: list[str] = Field(description="only names from the Jellyfin genre list")
     tmdb_movie_genre_ids: list[int]
@@ -453,6 +456,21 @@ class LLM:
                    genres_note=genres_note, taste_note=taste_note,
                    candidates=json.dumps(listing, ensure_ascii=False))
         sel: Selection = await self._call(self._avoid() + prompt, Selection, max_tokens=3000)
+        sel.intro = persona.enforce(sel.intro, speaker)
+        for p in sel.picks:
+            p.reason = persona.enforce(p.reason.splitlines()[0] if p.reason else "", speaker)
+        self._remember(sel.intro, *(p.reason for p in sel.picks))
+        return sel
+
+    async def identify(self, request: str, cands: list[Candidate], speaker: str) -> Selection:
+        """Which search hits are the title they asked about (usually one, at most three)."""
+        status = {"library": t("prompt.source_library"), "pending": t("prompt.source_pending"),
+                  "new": t("prompt.source_new")}
+        listing = [{"id": i, "title": c.label, "type": c.media_type, "status": status[c.source],
+                    "votes": c.votes, "overview": c.overview[:300]} for i, c in enumerate(cands)]
+        prompt = t("prompt.lookup", speaker=persona.speaker_instruction(speaker), request=request,
+                   candidates=json.dumps(listing, ensure_ascii=False))
+        sel: Selection = await self._call(self._avoid() + prompt, Selection, max_tokens=1500)
         sel.intro = persona.enforce(sel.intro, speaker)
         for p in sel.picks:
             p.reason = persona.enforce(p.reason.splitlines()[0] if p.reason else "", speaker)

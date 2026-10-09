@@ -39,6 +39,23 @@ can browse and decide at the same time.
 Never suggested: anything you've watched, started, rejected, rated or recently picked. Titles suggested in
 the last 3 days move to the back.
 
+## Asking about a specific title
+
+Ask about one title, or describe it, and Corsarr looks it up instead of suggesting something:
+
+- `@bot there's a new Marvel series with Vision now, isn't there?`
+- `@bot get us Dune Part Two`
+- `@bot there was this film where the guy only realises at the end that he was dead all along – what's it called?`
+
+The language model turns the message into search terms (its best guess of the title, plus keywords), Corsarr
+searches TMDB through Jellyseerr/Seerr, and the model picks the hit that is meant – usually one, at most three.
+You get the same card as for suggestions: *In your library*, *Already requested – downloading*, or new with the
+📥 **Request** button and the trailer. If nothing fits, the bot asks you to describe it differently or give the
+original title.
+
+Recognising a film from a plot description depends on the model's knowledge – Claude does this well, small local
+models often don't.
+
 ## Feedback after watching
 
 Requires the [Jellyfin webhook](Webhooks.md#jellyfin--feedback-after-watching).

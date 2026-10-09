@@ -13,7 +13,7 @@ def title_key(media_type: str, tmdb_id: int | str | None, jellyfin_id: str | Non
 @dataclass
 class Candidate:
     media_type: str  # "movie" | "tv"
-    source: str  # "library" | "new"
+    source: str  # "library" | "new" | "pending" (already requested, downloading)
     title: str
     year: int | None = None
     jellyfin_id: str | None = None
@@ -27,6 +27,7 @@ class Candidate:
     seasons: int | None = None
     trailer_url: str | None = None  # YouTube link from Jellyfin or TMDB
     score: float = 0.0
+    votes: int | None = None  # TMDB vote count – how well known a title is (helps tell search hits apart)
 
     @property
     def key(self) -> str:

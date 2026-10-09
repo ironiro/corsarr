@@ -73,6 +73,12 @@ DE: dict[str, str] = {
     "bot.hello": "Hallo",
     "bot.movie": "Film",
     "bot.series": "Serie",
+    "prompt.source_pending": "bereits angefragt, wird geladen",
+    "prompt.lookup": "Aufgabe: Sie suchen einen bestimmten Titel. Unten stehen Suchtreffer. Wähle den oder die Treffer, die gemeint sind – meist genau einen, höchstens drei (z. B. mehrere Teile einer Reihe), den besten zuerst. Ist keiner gemeint, wähle keinen. Beschreiben sie nur die Handlung, nutze dein Wissen über die Titel, um sie zuzuordnen. Pro Treffer eine Zeile, woran man erkennt, dass er es ist – keine Fakten erfinden, die du nicht sicher weißt. Einleitung: 1–2 kurze Zeilen; fragen sie nach dem Namen, beantworte die Frage direkt (z. B. „Das ist …“), und sag, ob der Titel schon da ist (status). {speaker}\n\nNachricht: {request}\n\nTreffer: {candidates}",
+    "sit.lookup_none": "Sie haben nach einem bestimmten Titel gefragt, aber die Suche bei Jellyseerr hat nichts Passendes gefunden (gesucht wurde nach den Begriffen in den Fakten). Sag das kurz und bitte darum, den Titel anders zu beschreiben oder den Originaltitel zu nennen.",
+    "bot.pending": "⏳ Bereits angefragt – wird geladen · {kind}",
+    "log.lookup": "Titelsuche nach {queries}: {n} Treffer",
+    "log.search_failed": "Suche nach „{query}“ fehlgeschlagen: {error}",
     "bot.in_library": "✅ In eurer Bibliothek · {kind}",
     "bot.not_available": "🆕 Nicht vorhanden – auf Wunsch anfragen · {kind}",
     "bot.rating": "⭐ Bewertung {rating}/10",
@@ -202,6 +208,13 @@ language: die Sprache, in der die Nachricht geschrieben ist, als ISO-Code (de, e
 intent:
 - recommend: sie wollen Vorschläge (Bibliothek zuerst), auch "passend zu dem, was wir zuletzt geschaut haben".
 - new_only: sie wollen ausdrücklich Neues, das noch nicht in der Bibliothek ist ("such nach Neuem").
+- lookup: sie fragen nach einem bestimmten Titel oder beschreiben einen ("es gibt doch jetzt eine Serie mit \
+Vision von Marvel", "hol uns Dune 2", "kennst du den neuen Film von Villeneuve?"). search_queries: 1–4 Suchbegriffe \
+für die TMDB-Suche – zuerst dein bester Tipp für den genauen Titel, auch wenn du unsicher bist oder der Titel \
+neuer sein könnte als dein Wissen; dann kurze Stichwörter aus der Nachricht (z. B. "Vision", "Marvel Vision"). \
+Beschreiben sie nur die Handlung ("der Film, wo der Kerl am Ende merkt, dass er tot ist – wie heißt der?"), \
+dann die Titel, die du anhand der Beschreibung für möglich hältst, wahrscheinlichster zuerst. \
+Originaltitel sind meist englisch. Bei allen anderen Absichten search_queries leer lassen.
 - settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Pirat an/aus, \
 Gen Z an/aus). Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null.
 - feedback: sie bewerten einen kürzlich geschauten Titel. title_key aus der Liste der letzten Titel \
@@ -663,6 +676,12 @@ EN: dict[str, str] = {
     "bot.hello": "Hello",
     "bot.movie": "Movie",
     "bot.series": "Series",
+    "prompt.source_pending": "already requested, downloading",
+    "prompt.lookup": "Task: they are looking for a specific title. Below are search hits. Pick the hit or hits they mean – usually exactly one, at most three (e.g. several parts of a series), best first. If none is meant, pick none. If they only describe the plot, use your knowledge of the titles to match it. One line per hit saying how you can tell it is the one – don't invent facts you are not sure of. Intro: 1–2 short lines; if they ask for the name, answer it directly (e.g. “That's …”), and say whether the title is already there (status). {speaker}\n\nMessage: {request}\n\nHits: {candidates}",
+    "sit.lookup_none": "They asked about a specific title, but the Jellyseerr search found nothing that fits (the search terms are in the facts). Say so briefly and ask them to describe the title differently or give the original title.",
+    "bot.pending": "⏳ Already requested – downloading · {kind}",
+    "log.lookup": "Title search for {queries}: {n} hits",
+    "log.search_failed": "Search for “{query}” failed: {error}",
     "bot.in_library": "✅ In your library · {kind}",
     "bot.not_available": "🆕 Not in your library – can be requested · {kind}",
     "bot.rating": "⭐ Rating {rating}/10",
@@ -790,6 +809,13 @@ language: the language the message is written in, as ISO code (de, en, …).
 intent:
 - recommend: they want suggestions (library first), also "something that fits what we watched lately".
 - new_only: they explicitly want something new that is not in the library yet ("look for something new").
+- lookup: they ask about one specific title or describe one ("there's a new Marvel series with Vision now", \
+"get us Dune 2", "do you know Villeneuve's new film?"). search_queries: 1–4 TMDB search terms – first your best \
+guess of the exact title, even if unsure or if the title may be newer than your knowledge; then short keywords \
+from the message (e.g. "Vision", "Marvel Vision"). If they only describe the plot ("the film where the guy \
+realises at the end that he was dead all along – what's it called?"), give the titles you think match the \
+description, most likely first. Original titles are usually English. For all other intents leave \
+search_queries empty.
 - settings: they change a setting (series pause in days, abort follow-up in days, pirate on/off, \
 Gen Z on/off). Convert weeks to days. Only set changed fields, otherwise null.
 - feedback: they rate a recently watched title. Pick title_key from the list of recent titles if \

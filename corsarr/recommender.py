@@ -1,6 +1,7 @@
 """5–6 suggestions per request: at most 2 from the library (shown first), the rest new via Jellyseerr."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -18,6 +19,9 @@ PICKS_MIN, PICKS_MAX = 5, 6
 MAX_LIBRARY_PICKS = 2  # library titles come first, but only a taste of them – the rest is new
 LIBRARY_POOL = 8       # candidates the model sees per source
 NEW_POOL = 20
+LOOKUP_QUERIES = 4     # search terms per lookup
+LOOKUP_POOL = 15       # search hits the model sees
+LOOKUP_PICKS = 3
 
 def genre_match(c: Candidate, wanted: set[str]) -> int:
     """How many of the requested genres the title carries (names compared case-insensitively)."""
@@ -101,6 +105,36 @@ class Recommender:
                 take(i, "")
         picks.sort(key=lambda pc: pc[0].source != "library")  # library first
         return Recommendation(intro=sel.intro, picks=picks, library_count=len(library))
+
+    async def lookup(self, request: str, und: Understanding, speaker: str) -> Recommendation:
+        """A specific title they asked about ("there's a new Marvel series with Vision"): search TMDB via
+        Jellyseerr with the model's search terms, then let the model say which hits are meant."""
+        queries = list(dict.fromkeys(q.strip() for q in und.search_queries if q.strip()))[:LOOKUP_QUERIES]
+        queries = queries or [request]
+        results = await asyncio.gather(*(self.seerr.search(q) for q in queries), return_exceptions=True)
+        hits: list[Candidate] = []
+        seen: set[str] = set()
+        for query, res in zip(queries, results):
+            if isinstance(res, Exception):
+                log.warning(t("log.search_failed", query=query, error=res))
+                continue
+            for c in res:
+                if (not und.media_types or c.media_type in und.media_types) and c.key not in seen:
+                    seen.add(c.key)
+                    hits.append(c)
+        log.info(t("log.lookup", queries=" | ".join(queries), n=len(hits)))
+        if not hits:
+            return Recommendation(intro="", picks=[], library_count=0)
+        hits = hits[:LOOKUP_POOL]
+        sel = await self.llm.identify(request, hits, speaker)
+        picks: list[tuple[Candidate, str]] = []
+        for p in sel.picks:
+            if 0 <= p.id < len(hits) and all(hits[p.id] is not c for c, _ in picks):
+                picks.append((hits[p.id], p.reason))
+        picks = picks[:LOOKUP_PICKS]
+        await self.seerr.enrich([c for c, _ in picks])
+        return Recommendation(intro=sel.intro, picks=picks,
+                              library_count=sum(1 for c, _ in picks if c.source == "library"))
 
     async def _new_titles(self, und: Understanding, media_types: list[str], exclude: set[str],
                           recent: set[str]) -> list[Candidate]:
