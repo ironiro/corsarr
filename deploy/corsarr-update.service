@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Corsarr (requested in the web interface)
+
+[Service]
+Type=oneshot
+Environment=CORSARR_DIR=/opt/corsarr CORSARR_DATA=/var/lib/corsarr CORSARR_BRANCH=main
+ExecStartPre=/bin/rm -f /var/lib/corsarr/update-requested
+# Runs a copy of install.sh: the update replaces the original while it is running.
+# Output goes to logs/update.log, which the web interface shows.
+ExecStart=/bin/bash -c 'mkdir -p /var/lib/corsarr/logs && cp /opt/corsarr/deploy/install.sh /run/corsarr-install.sh && bash /run/corsarr-install.sh > /var/lib/corsarr/logs/update.log 2>&1'

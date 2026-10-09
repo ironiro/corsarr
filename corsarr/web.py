@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
-from . import arr, config
+from . import arr, config, updates
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
@@ -208,6 +208,22 @@ async def api_restart(request: web.Request) -> web.Response:
     return web.json_response(status_payload(rt))
 
 
+async def api_update(request: web.Request) -> web.Response:
+    """Installed vs. latest version; ?force=1 skips the cache (button "Check for updates")."""
+    rt = _rt(request)
+    info = await updates.check(force=request.query.get("force") == "1")
+    return web.json_response({**info, "kind": updates.install_kind(), "updating": updates.updating(rt.cfg.data_dir),
+                              "log": updates.log_tail(rt.cfg.data_dir)})
+
+
+async def api_update_start(request: web.Request) -> web.Response:
+    if updates.install_kind() != "service":
+        return web.json_response({"error": t("gui.update_not_possible")}, status=400)
+    updates.request_update()
+    log.info(t("log.update_requested", remote=_remote(request)))
+    return web.json_response({"ok": True})
+
+
 async def api_events(request: web.Request) -> web.Response:
     try:
         after = int(request.query.get("after", "0"))
@@ -341,6 +357,8 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/check", api_check)
     app.router.add_post("/api/restart", api_restart)
     app.router.add_get("/api/events", api_events)
+    app.router.add_get("/api/update", api_update)
+    app.router.add_post("/api/update", api_update_start)
     app.router.add_get("/api/config", api_config)
     app.router.add_put("/api/config", api_config_save)
     app.router.add_put("/api/settings", api_settings_save)

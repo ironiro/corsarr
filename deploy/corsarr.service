@@ -8,6 +8,8 @@ Type=simple
 User=corsarr
 WorkingDirectory=/opt/corsarr
 Environment=DATA_DIR=/var/lib/corsarr PYTHONUNBUFFERED=1
+# Lets the web interface request updates (see corsarr-update.path) and compare against this branch
+Environment=CORSARR_UPDATE_TRIGGER=/var/lib/corsarr/update-requested CORSARR_BRANCH=main
 # Optional ("-"): everything else can be set in the web interface instead.
 EnvironmentFile=-/etc/corsarr.env
 ExecStart=/opt/corsarr/.venv/bin/python -m corsarr

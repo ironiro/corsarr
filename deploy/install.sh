@@ -65,10 +65,15 @@ say "Setting up Python environment …"
 "$APP_DIR/.venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
 
 say "Setting up service …"
-sed -e "s#/opt/corsarr#$APP_DIR#g" -e "s#/var/lib/corsarr#$DATA_DIR#g" \
-    "$APP_DIR/deploy/corsarr.service" > "/etc/systemd/system/$SERVICE.service"
+# corsarr.service runs the bot; corsarr-update.path/.service let the web interface trigger updates.
+for unit in corsarr.service corsarr-update.service corsarr-update.path; do
+    sed -e "s#/opt/corsarr#$APP_DIR#g" -e "s#/var/lib/corsarr#$DATA_DIR#g" \
+        -e "s#CORSARR_BRANCH=main#CORSARR_BRANCH=$BRANCH#g" \
+        "$APP_DIR/deploy/$unit" > "/etc/systemd/system/$unit"
+done
 systemctl daemon-reload
 systemctl enable --quiet "$SERVICE"
+systemctl enable --now --quiet corsarr-update.path
 systemctl restart "$SERVICE"
 
 say "Waiting for startup …"

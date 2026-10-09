@@ -6,6 +6,8 @@ let T = {};                 // GUI texts in the active language, from /api/i18n
 let tab = "status";
 let status = null;
 let configData = null;
+let updateInfo = null;      // /api/update: installed vs. latest version
+let updateTimer = null;
 const dirty = {};           // field name -> new value
 const resets = new Set();   // fields whose GUI value should be dropped
 let events = [];
@@ -196,7 +198,94 @@ function renderStatus() {
           st.status === "error" ? ` · ${T.last_ok}: ${ago(st.last_ok, s.now)}` : ""));
     }));
 
-  box.replaceChildren(botCard, h("h2", { style: "font-size:16px;margin:24px 0 12px" }, T.connections), services);
+  box.replaceChildren(botCard, h("div", { id: "version" }),
+    h("h2", { style: "font-size:16px;margin:24px 0 12px" }, T.connections), services);
+  renderVersion();
+  if (!updateInfo) loadUpdate(false);
+}
+
+// --- version and updates -----------------------------------------------------------------
+const short = sha => (sha || "").slice(0, 7);
+
+async function loadUpdate(force) {
+  try {
+    updateInfo = await api(`/api/update${force ? "?force=1" : ""}`);
+  } catch (e) { return; }
+  renderVersion();
+  if (updateInfo.updating) watchUpdate();
+}
+
+function renderVersion() {
+  const box = document.getElementById("version");
+  if (!box) return;
+  const u = updateInfo;
+  if (!u) { box.replaceChildren(); return; }
+  const checkBtn = h("button", { class: "btn", onclick: async e => {
+    e.target.disabled = true; e.target.textContent = T.checking; await loadUpdate(true);
+  } }, T.check_updates);
+  const rows = [];
+  rows.push(h("dl", { class: "facts" },
+    h("dt", {}, T.version_current), h("dd", {}, u.current ? short(u.current) : T.update_unknown),
+    u.latest ? [h("dt", {}, T.version_latest), h("dd", {}, short(u.latest))] : null));
+
+  let pill;
+  if (u.error) {
+    pill = h("span", { class: "pill error" }, T.status_error);
+    rows.push(h("div", { class: "notice error" }, tr("update_check_failed", { error: u.error })));
+  } else if (u.updating) {
+    pill = h("span", { class: "pill warn" }, T.updating_short);
+    rows.push(h("div", { class: "notice warn" }, T.updating));
+  } else if (u.behind > 0) {
+    pill = h("span", { class: "pill warn" }, tr("update_available", { n: u.behind }));
+    rows.push(h("ul", { class: "changes" }, u.commits.map(c =>
+      h("li", {}, h("code", {}, short(c.sha)), " ", c.message, h("span", { class: "muted" }, " · " + c.date.slice(0, 10))))));
+    if (u.kind === "service") {
+      rows.push(h("button", { class: "btn primary", onclick: startUpdate }, T.update_now));
+    } else if (u.kind === "docker") {
+      rows.push(h("p", { class: "hint" }, T.update_docker, " ", h("code", {}, "docker compose pull && docker compose up -d")));
+    } else {
+      rows.push(h("p", { class: "hint" }, T.update_manual, " ", h("code", {}, "git pull")));
+    }
+  } else if (u.latest) {
+    pill = h("span", { class: "pill ok" }, T.up_to_date);
+  }
+  if (u.log && (u.updating || u.behind > 0 || u.error)) {
+    rows.push(h("details", { open: u.updating }, h("summary", {}, T.update_log), h("pre", { class: "log-tail" }, u.log)));
+  }
+  box.replaceChildren(h("div", { class: "card" },
+    h("div", { class: "row" }, h("h2", {}, T.version), pill || "", h("span", { class: "spacer" }), checkBtn), rows));
+}
+
+async function startUpdate(e) {
+  if (!confirm(T.update_confirm)) return;
+  e.target.disabled = true;
+  try {
+    await api("/api/update", { method: "POST" });
+  } catch (err) {
+    alert(err.message);
+    e.target.disabled = false;
+    return;
+  }
+  updateInfo = { ...updateInfo, updating: true };
+  renderVersion();
+  watchUpdate();
+}
+
+// The bot restarts during the update, so requests fail for a while – keep polling until it is back
+// and reports a new version (or the update finished without one).
+function watchUpdate() {
+  if (updateTimer) return;
+  updateTimer = setInterval(async () => {
+    let u;
+    try { u = await api("/api/update?force=1"); } catch (e) { return; }
+    updateInfo = u;
+    renderVersion();
+    if (!u.updating) {
+      clearInterval(updateTimer);
+      updateTimer = null;
+      refreshStatus();
+    }
+  }, 4000);
 }
 
 async function run(btn, busyLabel, path) {
