@@ -26,6 +26,9 @@ RAM="${CORSARR_RAM:-512}"
 BRIDGE="${CORSARR_BRIDGE:-vmbr0}"
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+# Run a command in the container with a locale every Debian has. Otherwise the host shell's locale
+# (e.g. de_DE.UTF-8, not installed in the fresh container) causes "Setting locale failed" warnings.
+ct() { pct exec "$CTID" -- env LANG=C.UTF-8 LC_ALL=C.UTF-8 "$@"; }
 die() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Please run as root in the Proxmox host shell."
@@ -65,17 +68,17 @@ pct start "$CTID"
 
 say "Waiting for the network in the container …"
 for _ in $(seq 1 60); do
-    pct exec "$CTID" -- getent hosts raw.githubusercontent.com >/dev/null 2>&1 && break
+    ct getent hosts raw.githubusercontent.com >/dev/null 2>&1 && break
     sleep 2
 done
-pct exec "$CTID" -- getent hosts raw.githubusercontent.com >/dev/null 2>&1 \
+ct getent hosts raw.githubusercontent.com >/dev/null 2>&1 \
     || die "Container $CTID has no internet access. Check bridge/IP, then: pct enter $CTID"
 
 say "Enabling root auto-login on the Proxmox console …"
 # The container has no root password; the console in the Proxmox UI (reachable only by Proxmox admins)
 # logs in automatically, like the Proxmox community scripts do. There is no network login.
 # shellcheck disable=SC2016  # single quotes on purpose: the script runs inside the container
-pct exec "$CTID" -- bash -c '
+ct bash -c '
     mkdir -p /etc/systemd/system/container-getty@1.service.d
     cat > /etc/systemd/system/container-getty@1.service.d/override.conf <<EOF
 [Service]
@@ -86,11 +89,11 @@ EOF
     systemctl restart container-getty@1.service'
 
 say "Installing Corsarr inside the container …"
-pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null"
-pct exec "$CTID" -- env CORSARR_BRANCH="$BRANCH" \
+ct bash -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null"
+ct CORSARR_BRANCH="$BRANCH" \
     bash -c "curl -fsSL $REPO_RAW/$BRANCH/deploy/install.sh | bash"
 
-IP="$(pct exec "$CTID" -- hostname -I | awk '{print $1}')"
+IP="$(ct hostname -I | awk '{print $1}')"
 echo
 say "Done: Corsarr runs in container $CTID ($HOSTNAME_CT)."
 echo "    Web interface:  http://${IP:-<container-ip>}:8787/"
