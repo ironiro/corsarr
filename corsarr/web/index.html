@@ -6,6 +6,13 @@
   <title>Corsarr</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Apply the chosen skin before the first paint (no flash of the default look); app.js switches it.
+    try {
+      const skin = localStorage.getItem("corsarr.skin");
+      document.documentElement.dataset.skin = ["arr", "terminal", "vhs", "soft"].includes(skin) ? skin : "arr";
+    } catch (e) { document.documentElement.dataset.skin = "arr"; }
+  </script>
 </head>
 <body>
   <div id="app"></div>
