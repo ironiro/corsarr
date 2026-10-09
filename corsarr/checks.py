@@ -51,13 +51,13 @@ async def run_checks(cfg: Config, *, bot: Bot | None = None, jellyfin: Jellyfin 
         own.append(llm.close)
 
     async def jellyfin_info() -> str:
-        uid = await jellyfin.uid()
+        await jellyfin.uid()  # fails when the shared account does not exist
         genres = await jellyfin.genres()
-        return t("check.jellyfin", uid=uid, n=len(genres), examples=", ".join(genres[:5]))
+        return t("check.jellyfin", user=cfg.jellyfin_user, n=len(genres))
 
     async def seerr_info() -> str:
         mv = await seerr.genres("movie")
-        return t("check.jellyseerr", n=len(mv), examples=", ".join(g["name"] for g in mv[:5]))
+        return t("check.jellyseerr", n=len(mv))
 
     async def llm_info() -> str:
         if ping:
