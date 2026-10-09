@@ -71,6 +71,20 @@ done
 pct exec "$CTID" -- getent hosts raw.githubusercontent.com >/dev/null 2>&1 \
     || die "Container $CTID has no internet access. Check bridge/IP, then: pct enter $CTID"
 
+say "Enabling root auto-login on the Proxmox console …"
+# The container has no root password; the console in the Proxmox UI (reachable only by Proxmox admins)
+# logs in automatically, like the Proxmox community scripts do. There is no network login.
+# shellcheck disable=SC2016  # single quotes on purpose: the script runs inside the container
+pct exec "$CTID" -- bash -c '
+    mkdir -p /etc/systemd/system/container-getty@1.service.d
+    cat > /etc/systemd/system/container-getty@1.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud tty%I 115200,38400,9600 \$TERM
+EOF
+    systemctl daemon-reload
+    systemctl restart container-getty@1.service'
+
 say "Installing Corsarr inside the container …"
 pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null"
 pct exec "$CTID" -- env CORSARR_BRANCH="$BRANCH" \
@@ -81,4 +95,5 @@ echo
 say "Done: Corsarr runs in container $CTID ($HOSTNAME_CT)."
 echo "    Web interface:  http://${IP:-<container-ip>}:8787/"
 echo "    Update:         pct exec $CTID -- bash -c \"curl -fsSL $REPO_RAW/main/deploy/install.sh | bash\""
+echo "    Console:        Proxmox UI → $CTID → Console (logs in automatically), or: pct enter $CTID"
 echo "    Remove:         pct stop $CTID && pct destroy $CTID"

@@ -34,6 +34,10 @@ The script
 
 Nothing is installed on the Proxmox host itself.
 
+**Getting into the container:** the container has no root password. Its console in the Proxmox UI logs
+in as root automatically (only Proxmox admins can open it); from the host shell use `pct enter <id>`.
+To log in with a password instead, set one with `pct exec <id> -- passwd root`.
+
 **Static IP (recommended):** Jellyfin, Sonarr and Radarr use the container's address for their webhooks, so
 it should not change. Either reserve the address in your router, or set it when creating the container:
 
