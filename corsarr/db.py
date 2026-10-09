@@ -386,6 +386,13 @@ class DB:
             (kind, group_key, title, tmdb_id, season, episode, episode_title, int(fresh), iso(now())),
         )
 
+    def has_import(self, group_key: str, season: int | None, episode: int | None, since: datetime) -> bool:
+        """Whether this episode (or movie: season/episode None) was recorded since `since`."""
+        row = self.conn.execute(
+            "SELECT 1 FROM arr_imports WHERE group_key=? AND season IS ? AND episode IS ? AND created_at>=? LIMIT 1",
+            (group_key, season, episode, iso(since))).fetchone()
+        return row is not None
+
     def pending_imports(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM arr_imports WHERE notified=0 ORDER BY id")
         return [dict(r) for r in rows]

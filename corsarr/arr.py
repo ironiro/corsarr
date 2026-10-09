@@ -4,12 +4,17 @@ Every imported file is stored first. A periodic job then turns each series/movie
 nothing new arrived for a while: fresh episodes (aired in the last days) after a short pause, backfills
 (old seasons) only when the whole download has settled – "88 episodes from seasons 1–4" instead of 88
 messages. Stored imports survive a restart of the bot.
+
+Sonarr and Radarr don't retry a webhook that failed (e.g. Corsarr was restarting). With their access
+remembered, catch_up() reads their history and records imports whose webhook never arrived.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from .db import DB, now, parse_iso
+import httpx
+
+from .db import DB, iso, now, parse_iso
 from .i18n import t
 
 FRESH_AGE = timedelta(days=7)          # aired within this window = a "new episode" of a running show
@@ -17,6 +22,9 @@ QUIET_FRESH = timedelta(minutes=2)     # e.g. double episodes arrive together
 QUIET_BACKFILL = timedelta(minutes=15)  # season packs import file by file over several minutes
 QUIET_MOVIE = timedelta(minutes=1)
 LIST_EPISODES = 3                      # up to this many fresh episodes are named individually
+CATCH_UP_FIRST = timedelta(hours=48)   # first catch-up: how far back to look
+CATCH_UP_OVERLAP = timedelta(minutes=10)  # later runs re-read a little, imports may be logged late
+KNOWN_FOR = timedelta(days=14)         # an import recorded within this window counts as already known
 
 
 def _aired(value: str | None) -> datetime | None:
@@ -50,6 +58,52 @@ def record_radarr(db: DB, event: dict) -> int:
     db.add_import("movie", f"radarr:{movie.get('id')}", _label(movie), movie.get("tmdbId"), None, None, None,
                   True)
     return 1
+
+
+async def catch_up(db: DB, kind: str, url: str, api_key: str, client: httpx.AsyncClient | None = None) -> int:
+    """Record imports from Sonarr/Radarr's history that no webhook reported. Returns how many were added.
+
+    The first run looks back CATCH_UP_FIRST; later runs continue where the last one stopped. Imports already
+    recorded (by webhook or an earlier run) are skipped, and so are quality upgrades, like in the webhook.
+    """
+    cursor_key = f"arr_cursor:{kind}"
+    started = now()
+    cursor = db.get_state(cursor_key)
+    since = parse_iso(cursor) - CATCH_UP_OVERLAP if cursor else started - CATCH_UP_FIRST
+    include = {"includeSeries": "true", "includeEpisode": "true"} if kind == "sonarr" else {"includeMovie": "true"}
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=30)
+    try:
+        r = await client.get(f"{url.rstrip('/')}/api/v3/history/since", headers={"X-Api-Key": api_key},
+                             params={"date": since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **include})
+        r.raise_for_status()
+        records = r.json()
+    finally:
+        if own:
+            await client.aclose()
+
+    # An upgrade deletes the old file with reason "Upgrade" – the webhook marks those as isUpgrade.
+    item = "episodeId" if kind == "sonarr" else "movieId"
+    upgraded = {rec.get(item) for rec in records
+                if rec.get("eventType") in ("episodeFileDeleted", "movieFileDeleted")
+                and (rec.get("data") or {}).get("reason") == "Upgrade"}
+    added = 0
+    for rec in records:
+        if rec.get("eventType") != "downloadFolderImported" or rec.get(item) in upgraded:
+            continue
+        if kind == "sonarr":
+            series, ep = rec.get("series") or {}, rec.get("episode") or {}
+            if not series or not ep or db.has_import(f"sonarr:{series.get('id')}", ep.get("seasonNumber"),
+                                                     ep.get("episodeNumber"), now() - KNOWN_FOR):
+                continue
+            added += record_sonarr(db, {"eventType": "Download", "series": series, "episodes": [ep]})
+        else:
+            movie = rec.get("movie") or {}
+            if not movie or db.has_import(f"radarr:{movie.get('id')}", None, None, now() - KNOWN_FOR):
+                continue
+            added += record_radarr(db, {"eventType": "Download", "movie": movie})
+    db.set_state(cursor_key, iso(started))
+    return added
 
 
 def due_messages(db: DB) -> list[tuple[list[int], str]]:

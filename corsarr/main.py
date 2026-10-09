@@ -164,6 +164,7 @@ class Runtime:
             app.job_queue.run_repeating(self.corsarr.job_feedback, interval=600, first=30)
             app.job_queue.run_repeating(self.corsarr.job_outage, interval=300, first=300)
             app.job_queue.run_repeating(self.corsarr.job_downloads, interval=60, first=10)
+            app.job_queue.run_repeating(self.corsarr.job_catch_up, interval=600, first=20)
             await app.start()
             await app.updater.start_polling(
                 allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=True,

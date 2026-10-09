@@ -93,3 +93,59 @@ def test_sonarr_webhook_needs_secret_and_stores(db, tmp_path, monkeypatch):
     asyncio.run(go())
     assert len(db.pending_imports()) == 2 and health.services["sonarr"].status == "ok"
     health.reset()
+
+
+# --- catching up imports whose webhook never arrived --------------------------------------------
+
+def history(records, seen=None):
+    import httpx
+
+    def handler(request):
+        if seen is not None:
+            seen.append(dict(request.url.params))
+        return httpx.Response(200, json=records)
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+MOBLAND = {"id": 7, "title": "MobLand", "year": 2025, "tmdbId": 247718}
+
+
+def imported(ep_id, season, number, aired, event="downloadFolderImported", reason=None):
+    rec = {"eventType": event, "episodeId": ep_id, "series": MOBLAND,
+           "episode": {"id": ep_id, "seasonNumber": season, "episodeNumber": number, "title": f"E{number}",
+                       "airDateUtc": aired}}
+    if reason:
+        rec["data"] = {"reason": reason}
+    return rec
+
+
+def catch_up(db, kind, records, seen=None):
+    async def go():
+        async with history(records, seen) as client:
+            return await arr.catch_up(db, kind, "http://sonarr:8989/", "key", client=client)
+    return asyncio.run(go())
+
+
+def test_catch_up_records_missed_imports_once_and_skips_upgrades(db):
+    aired = iso(now() - timedelta(days=1))
+    # S02E01 came by webhook; S02E02 was missed; S01E05 was an upgrade of an existing file.
+    arr.record_sonarr(db, {"eventType": "Download", "series": MOBLAND,
+                           "episodes": [{"id": 1, "seasonNumber": 2, "episodeNumber": 1, "airDateUtc": aired}]})
+    records = [imported(1, 2, 1, aired), imported(2, 2, 2, aired),
+               imported(3, 1, 5, aired), imported(3, 1, 5, aired, event="episodeFileDeleted", reason="Upgrade"),
+               {"eventType": "grabbed", "episodeId": 9}]
+    seen = []
+    assert catch_up(db, "sonarr", records, seen) == 1
+    assert seen[0]["includeSeries"] == "true" and seen[0]["date"].endswith("Z")
+    pending = [(r["season"], r["episode"], r["fresh"]) for r in db.pending_imports()]
+    assert pending == [(2, 1, 1), (2, 2, 1)]  # the missed one is a fresh episode like the webhook's
+    assert catch_up(db, "sonarr", records) == 0  # next run: nothing twice
+    assert db.get_state("arr_cursor:sonarr")
+
+
+def test_catch_up_movies(db):
+    movie = {"id": 3, "title": "Weapons", "year": 2025, "tmdbId": 1078605}
+    records = [{"eventType": "downloadFolderImported", "movieId": 3, "movie": movie}]
+    assert catch_up(db, "radarr", records) == 1
+    assert catch_up(db, "radarr", records) == 0
+    assert [r["title"] for r in db.pending_imports()] == ["Weapons (2025)"]

@@ -100,6 +100,11 @@ it can:
 | Jellyfin webhook | The Webhook plugin is installed and a destination points at `…/jellyfin` with the right secret, is enabled and has *Playback Stop* selected | nothing extra – the Jellyfin API key Corsarr has anyway |
 | Sonarr / Radarr | The service is reachable and the key valid, and the `Corsarr` webhook with the current secret exists and has *On File Import* on. **Check now** also lets the service send its test event to Corsarr, which checks the whole way back | the access remembered in *Setup → Webhooks* (*Remember access*) |
 
+With remembered access Corsarr also **catches up missed imports**: Sonarr and Radarr don't retry a webhook that
+failed (for example while Corsarr was restarting for an update). Every 10 minutes – and right after a start –
+Corsarr reads their history and reports imports that no webhook brought, without sending anything twice and
+skipping quality upgrades like the webhook does. The first run looks back 48 hours.
+
 Without remembered access, the Sonarr and Radarr tiles only show when the last event arrived. The automatic
 check every 5 minutes never sends test events – only the **Check now** button does.
 
