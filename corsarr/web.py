@@ -140,8 +140,14 @@ async def health_endpoint(_: web.Request) -> web.Response:
 
 # --- GUI: pages and auth -----------------------------------------------------------
 
-async def index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+async def index(_: web.Request) -> web.Response:
+    # The version in the asset URLs makes browsers fetch the new app.js/style.css after an update
+    # instead of reusing a cached copy.
+    version = (updates.current_version() or str(int((STATIC / "app.js").stat().st_mtime)))[:12]
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    html = html.replace('/static/app.js"', f'/static/app.js?v={version}"')
+    html = html.replace('/static/style.css"', f'/static/style.css?v={version}"')
+    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 async def api_i18n(_: web.Request) -> web.Response:
@@ -190,6 +196,7 @@ def status_payload(rt: "Runtime") -> dict:
         "log_file": str(rt.cfg.log_dir / "corsarr.log"),
         "language": language(),
         "auth": bool(rt.cfg.admin_password),
+        "version": updates.current_version() or "",
     }
 
 

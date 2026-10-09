@@ -305,3 +305,15 @@ def test_claude_model_picker_marks_haiku_and_prices(env, monkeypatch):
         fable = res["models"][1]["cost"]
         assert fable["factor"] == 100 and fable["per_suggestion"] == 0.2
     with_client(test)
+
+
+def test_interface_assets_carry_the_version_so_updates_are_not_cached(env, monkeypatch):
+    from corsarr import updates
+    monkeypatch.setattr(updates, "current_version", lambda: "abcdef1234567890")
+
+    async def test(client, rt):
+        html = await (await client.get("/")).text()
+        assert '/static/app.js?v=abcdef123456"' in html and '/static/style.css?v=abcdef123456"' in html
+        await login(client)
+        assert (await (await client.get("/api/status")).json())["version"] == "abcdef1234567890"
+    with_client(test)
