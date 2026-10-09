@@ -206,12 +206,13 @@ class Runtime:
         log.error(t("log.telegram_error", error=context.error), exc_info=context.error)
 
     # --- status ------------------------------------------------------------------
-    async def check(self) -> None:
+    async def check(self, manual: bool = False) -> None:
+        """`manual`: the "Check now" button – also lets Sonarr/Radarr send a test event."""
         running = self.state == "running"
         await run_checks(self.cfg, bot=self.app.bot if running and self.app else None,
                          jellyfin=self.jellyfin if running else None,
                          seerr=self.seerr if running else None,
-                         llm=self.llm if running else None)
+                         llm=self.llm if running else None, send_tests=manual)
 
     async def health_loop(self) -> None:
         while True:

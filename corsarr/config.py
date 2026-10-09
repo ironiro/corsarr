@@ -78,6 +78,12 @@ FIELDS: tuple[Field, ...] = (
     Field("WEBHOOK_PORT", "advanced", default="8787", kind="int", app_restart=True),
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
     Field("WEBHOOK_SECRET", "webhooks", required=True),
+    # Optional: only saved when chosen in the setup assistant – lets the status page check Sonarr/Radarr
+    # actively instead of only noticing when their messages arrive.
+    Field("SONARR_URL", "webhooks", kind="url", live=True),
+    Field("SONARR_API_KEY", "webhooks", secret=True, live=True),
+    Field("RADARR_URL", "webhooks", kind="url", live=True),
+    Field("RADARR_API_KEY", "webhooks", secret=True, live=True),
     Field("ADMIN_PASSWORD", "interface", secret=True),
     # Docker images follow the channel of their tag (CORSARR_CHANNEL), so there it is fixed.
     Field("UPDATE_CHANNEL", "interface", default="stable", kind="choice", choices=("stable", "beta", "dev"), live=True),

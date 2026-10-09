@@ -116,7 +116,7 @@ class FakeRuntime:
         self.restarts += 1
         self.cfg = config.load()
 
-    async def check(self):
+    async def check(self, manual=False):
         self.checks += 1
 
     async def restore(self, settings, database):

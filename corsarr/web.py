@@ -105,7 +105,8 @@ async def jellyfin_webhook(request: web.Request) -> web.Response:
         return event
     kind = event.get("event") or event.get("NotificationType")
     log.info(t("log.webhook", kind=kind, item=event.get("itemId") or event.get("ItemId")))
-    health.ok("webhook", t("check.webhook_last", kind=kind))
+    health.services["webhook"].event = t("check.webhook_last", kind=kind)
+    health.ok("webhook", health.services["webhook"].event)
     if kind == "PlaybackStop":
         if rt.feedback is None:
             log.warning(t("log.webhook_not_ready"))
@@ -132,7 +133,8 @@ async def _arr_webhook(request: web.Request, service: str, record) -> web.Respon
         return web.Response(status=503, text="database unavailable")
     stored = record(_rt(request).db, event)
     log.info(t("log.arr_event", service=service.capitalize(), kind=kind, n=stored))
-    health.ok(service, t("check.webhook_last", kind=kind))
+    health.services[service].event = t("check.webhook_last", kind=kind)
+    health.ok(service, health.services[service].event)
     return web.Response(text="ok")
 
 
@@ -211,7 +213,7 @@ async def api_status(request: web.Request) -> web.Response:
 
 async def api_check(request: web.Request) -> web.Response:
     rt = _rt(request)
-    await rt.check()
+    await rt.check(manual=True)
     return web.json_response(status_payload(rt))
 
 
@@ -351,7 +353,8 @@ async def api_setup_webhooks(request: web.Request) -> web.Response:
 
 
 async def api_setup_arr(request: web.Request) -> web.Response:
-    """Create the webhook in Sonarr/Radarr. Their address and key are only used for this, never stored."""
+    """Create the webhook in Sonarr/Radarr. Address and key come from the form, or from the saved access
+    (stored only when the user ticked "Remember access" – the assistant saves them through the config API)."""
     rt = _rt(request)
     body = await _json_body(request)
     kind = body.get("kind")
@@ -359,7 +362,8 @@ async def api_setup_arr(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "unknown service"}, status=400)
     hook = setup.webhook_urls(str(body.get("base") or _base_url(request)), rt.cfg.webhook_secret)[kind]
     try:
-        result = await setup.connect_arr(kind, str(body.get("url") or ""), str(body.get("api_key") or ""), hook)
+        result = await setup.connect_arr(kind, str(body.get("url") or rt.cfg.get(f"{kind.upper()}_URL")),
+                                         str(body.get("api_key") or rt.cfg.get(f"{kind.upper()}_API_KEY")), hook)
     except setup.SetupError as e:
         return _setup_error(e)
     log.info(t("log.arr_connected", service=kind.capitalize()))
