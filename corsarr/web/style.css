@@ -562,7 +562,7 @@ summary { cursor: pointer; color: var(--muted); }
   font: 700 30px/1 var(--mono); letter-spacing: 4px; text-transform: uppercase;
   background: linear-gradient(180deg, #ffe66d, var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-[data-skin="vhs"] #statepill .pill { font-family: var(--mono); text-transform: uppercase; }
+
 [data-skin="vhs"] nav { gap: 8px; }
 [data-skin="vhs"] nav button {
   font-family: var(--mono); text-transform: uppercase; letter-spacing: 1px; font-size: 14px;
@@ -623,17 +623,17 @@ summary { cursor: pointer; color: var(--muted); }
 [data-skin="vhs"] .service .pill.ok { color: #08808a; }
 [data-skin="vhs"] .service .pill.error { color: #c81e3c; }
 [data-skin="vhs"] .service .pill.warn { color: #8a5a00; }
-/* Tape window: two still reels with the deck's state between them – PLAY / STOP / PAUSE.
+/* Tape window: two still reels with the state between them, in words, with deck symbols ▶ ■ ❚❚.
    (Turning reels looked like loading spinners, so nothing moves here.) */
 [data-skin="vhs"] .service > .reels { display: flex; grid-area: reels; align-items: center; justify-content: space-between;
                                       gap: 8px; margin-top: 8px; padding: 0 10px; }
 [data-skin="vhs"] .reels i { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 4px solid #3a3a46;
                              background: radial-gradient(circle, #1d1d24 0 3px, #6a6a78 4px 6px, #2a2a33 7px); }
-[data-skin="vhs"] .reels::after { order: 0; flex: 1; text-align: center; font: 700 14px/1 var(--mono); letter-spacing: 2px;
-                                  content: "❚❚ PAUSE"; color: #8a7fa3; }
+[data-skin="vhs"] .reels::after { order: 0; flex: 1; text-align: center; font: 700 13px/1 var(--mono); letter-spacing: 1.5px; text-transform: uppercase;
+                                  content: "❚❚ " attr(data-label); color: #8a7fa3; }
 [data-skin="vhs"] .reels i:last-child { order: 1; }
-[data-skin="vhs"] .service.ok .reels::after { content: "▶ PLAY"; color: var(--accent); text-shadow: 0 0 8px var(--accent); }
-[data-skin="vhs"] .service.error .reels::after { content: "■ STOP"; color: #ff4d6d; text-shadow: 0 0 8px #ff4d6d; }
+[data-skin="vhs"] .service.ok .reels::after { content: "▶ " attr(data-label); color: var(--accent); text-shadow: 0 0 8px var(--accent); }
+[data-skin="vhs"] .service.error .reels::after { content: "■ " attr(data-label); color: #ff4d6d; text-shadow: 0 0 8px #ff4d6d; }
 [data-skin="vhs"] .service > .meta { color: #9c94b0; margin-top: 6px; font-family: var(--mono); text-transform: uppercase; font-size: 11.5px; }
 [data-skin="vhs"] .disclaimer { font-family: var(--mono); text-transform: uppercase; color: #a89cc4; font-size: 12px; letter-spacing: .3px; }
 [data-skin="vhs"] .log { background: rgba(12, 4, 26, .82); border-color: var(--border); }
@@ -764,3 +764,33 @@ summary { cursor: pointer; color: var(--muted); }
 }
 #version .btn.primary { margin-top: 12px; }
 .release summary { margin-top: 0; }
+
+/* The bot state as a recorder display ("● REC") next to the logo, not a boxed label. */
+[data-skin="vhs"] #statepill .pill {
+  border: 0; padding: 0 4px; font: 700 16px/1 var(--mono); letter-spacing: 2px; text-transform: uppercase;
+  text-shadow: 0 0 8px currentColor;
+}
+[data-skin="vhs"] #statepill .pill::before { width: 9px; height: 9px; }
+
+/* --- configuration: collapsible sections ---------------------------------------------------------- */
+details.group { margin-top: 0; border-top: 1px solid var(--line); }
+details.group:last-of-type { border-bottom: 1px solid var(--line); }
+details.group > summary {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px 2px; cursor: pointer; list-style: none;
+}
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary::before { content: "▸"; color: var(--muted); transition: transform .15s; flex: none; }
+details.group[open] > summary::before { transform: rotate(90deg); }
+details.group > summary h3 { margin: 0; flex: none; }
+details.group > summary .pill { flex: none; }
+details.group > summary .summary {
+  flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+details.group[open] > summary .summary { visibility: hidden; }
+details.group > .field:last-child { margin-bottom: 16px; }
+.field .info .tag {
+  font: 600 10.5px/1 var(--mono); letter-spacing: .5px; padding: 2px 5px; border: 1px solid var(--line);
+  color: var(--muted); cursor: help;
+}
+@media (prefers-reduced-motion: reduce) { details.group > summary::before { transition: none; } }
+@media (max-width: 640px) { details.group > summary .summary { display: none; } }

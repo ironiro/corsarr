@@ -237,7 +237,9 @@ function renderStatus() {
         h("div", { class: "meta" },
           `${T.last_check}: ${ago(st.checked_at, s.now)}`,
           st.status === "error" ? ` · ${T.last_ok}: ${ago(st.last_ok, s.now)}` : ""),
-        h("div", { class: "reels", "aria-hidden": "true" }, h("i"), h("i")));
+        // Tape window of the video store skin: the state in plain words between the reels
+        h("div", { class: "reels", "aria-hidden": "true",
+                   "data-label": { ok: T.deck_ok, error: T.deck_error, disabled: T.status_disabled }[st.status] || T.deck_wait }, h("i"), h("i")));
     }));
 
   // Summary "n/7 ok" – drawn as a ring in the soft skin (green = ok, orange = error, rest = waiting).
@@ -418,7 +420,8 @@ function renderEvents() {
 }
 
 // --- config tab ---------------------------------------------------------------------------
-const GROUPS = ["telegram", "llm", "jellyfin", "jellyseerr", "web", "system"];
+const GROUPS = ["telegram", "llm", "jellyfin", "jellyseerr", "webhooks", "interface", "advanced"];
+const openGroups = new Set();  // sections the user opened; those with errors open by themselves
 
 async function viewConfig(main) {
   const box = h("div", { id: "config" });
@@ -546,10 +549,18 @@ function renderConfig(message) {
     }));
 
   // Connection and system fields: only saved with the button, then the bot restarts.
+  // One collapsible section per group; closed it shows a one-line summary and whether something is missing.
   const groups = GROUPS.map(g => {
     // Fields of providers that are not selected stay hidden (and are not used).
     const fields = configData.fields.filter(f => f.group === g && (!f.provider || f.provider === providerId()));
-    return h("div", { class: "group" }, h("h3", {}, T["group_" + g]), fields.map(fieldRow));
+    const missing = fields.filter(f => f.error && !(f.name in dirty)).length;
+    const changed = fields.some(f => f.name in dirty || resets.has(f.name));
+    const state = missing ? h("span", { class: "pill error" }, missing === 1 ? T.group_missing_one : tr("group_missing", { n: missing }))
+      : changed ? h("span", { class: "pill warn" }, T.group_changed) : h("span", { class: "pill ok" }, T.group_ok);
+    return h("details", { class: "group", open: missing > 0 || openGroups.has(g),
+                          ontoggle: e => { e.target.open ? openGroups.add(g) : openGroups.delete(g); } },
+      h("summary", {}, h("h3", {}, T["group_" + g]), state, h("span", { class: "summary muted" }, groupSummary(g, fields))),
+      fields.map(fieldRow));
   });
   const saveBtn = h("button", { class: "btn primary", id: "savebtn", onclick: e => saveConfig(e.target) }, T.save);
   const savebar = h("div", { class: "savebar" }, saveBtn, h("span", { id: "unsaved", class: "muted" }), message || "");
@@ -558,6 +569,33 @@ function renderConfig(message) {
 
   box.replaceChildren(behaviour, conn);
   updateSaveBar();
+}
+
+// "Claude · claude-haiku-5-5", "http://…:8096 · Kino" – the values that tell sections apart at a glance.
+function groupSummary(g, fields) {
+  const shown = name => {
+    const f = fields.find(x => x.name === name);
+    if (!f) return "";
+    const v = f.name in dirty ? dirty[f.name] : f.value || f.default;
+    if (f.secret) return f.is_set || dirty[f.name] ? T.secret_is_set : "";
+    return choiceLabel(f, v);
+  };
+  if (g === "interface") {
+    return [shown("LANGUAGE"), shown("UPDATE_CHANNEL"),
+            fields.find(f => f.name === "ADMIN_PASSWORD")?.is_set ? T.password_set : T.password_none].join(" · ");
+  }
+  if (g === "webhooks") return shown("WEBHOOK_SECRET") ? T.secret_is_set : "";
+  const names = { telegram: ["TELEGRAM_CHAT_ID"], llm: ["LLM_PROVIDER", providerInfo(providerId()).fields.model],
+                  jellyfin: ["JELLYFIN_URL", "JELLYFIN_USER"], jellyseerr: ["JELLYSEERR_URL"],
+                  advanced: ["WEBHOOK_HOST", "WEBHOOK_PORT", "LOG_LEVEL"] }[g] || [];
+  return names.map(shown).filter(Boolean).join(" · ");
+}
+
+// Readable names for choice values (provider and channel); other values as they are.
+function choiceLabel(f, v) {
+  if (f.name === "LLM_PROVIDER") return providerInfo(v).name;
+  if (f.name === "UPDATE_CHANNEL") return T["channel_" + v] || v;
+  return v;
 }
 
 function changeCount() {
@@ -594,7 +632,7 @@ function fieldRow(f) {
     // select built above
   } else if (f.kind === "choice") {
     input = h("select", { id, onchange: onInput },
-      f.choices.map(c => h("option", { value: c, selected: c === current }, c)));
+      f.choices.map(c => h("option", { value: c, selected: c === current }, choiceLabel(f, c))));
   } else {
     input = h("input", {
       id, type: f.secret ? "password" : "text",
@@ -606,23 +644,24 @@ function fieldRow(f) {
     });
   }
   const info = [];
-  if (!f.editable) info.push(T.readonly);
-  else if (f.source === "gui" && !resets.has(f.name)) {
-    info.push(T.from_gui);
+  if (T["h_" + f.name]) info.push(T["h_" + f.name]);
+  if (f.editable && f.source === "gui" && !resets.has(f.name)) {
     info.push(h("button", { class: "link", title: T.reset_hint, onclick: () => {
       resets.add(f.name); delete dirty[f.name]; renderConfig();
-    } }, T.reset));
-  } else if (f.source === "env") info.push(T.from_env);
+    } }, T.reset_short));
+  } else if (f.source === "env") info.push(h("span", { class: "tag", title: T.from_env_title }, T.env_tag));
   const pickerError = { [pf.model]: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
   if (pickerError && input.tagName !== "SELECT") info.push(tr("options_fallback", { error: pickerError }));
   return h("div", { class: "field" },
-    h("label", { for: id }, T["f_" + f.name] || f.name, f.required ? h("span", { class: "req", title: T.required }, "\u00a0*") : "",
-      h("span", { class: "name" }, f.name)),
+    // The technical name (for environment variables and the docs) only shows on hover.
+    h("label", { for: id, title: f.name }, T["f_" + f.name] || f.name,
+      f.required ? h("span", { class: "req", title: T.required }, "\u00a0*") : ""),
     h("div", {}, input,
       f.name === "CLAUDE_MODEL" ? modelWarning(current || f.default) : null,
       f.name === "LLM_PROVIDER" ? providerNotice(current || f.default) : null,
       info.length ? h("div", { class: "info" }, info.map(i => typeof i === "string" ? h("span", {}, i) : i)) : null,
-      f.error && !(f.name in dirty) ? h("div", { class: "err" }, f.error) : null));
+      f.error && !(f.name in dirty)
+        ? h("div", { class: "err" }, f.required && !f.is_set ? T.field_missing : f.error) : null));
 }
 
 async function saveSetting(key, value) {
