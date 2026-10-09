@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
+from .i18n import t
+
 SERVICES = ("telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr")
 
 
@@ -26,7 +28,15 @@ def describe_error(exc: BaseException) -> str:
     httpx only says "All connection attempts failed"; the useful part ("No route to host",
     "Connection refused", a DNS failure) sits in the chained OSError.
     """
+    if type(exc).__module__.startswith("corsarr") and str(exc):
+        return str(exc)  # our own exceptions already carry a readable message
     text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    if isinstance(exc, httpx.TimeoutException) and not str(exc):
+        try:  # "ConnectTimeout" alone doesn't say which address didn't answer
+            url = exc.request.url
+            return f"{text} ({t('check.no_answer', target=f'{url.host}:{url.port or url.scheme}')})"
+        except RuntimeError:
+            return text
     seen: set[int] = set()
     stack: list[BaseException] = [exc]
     while stack:

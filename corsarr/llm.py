@@ -58,10 +58,15 @@ async def available_claude_models(api_key: str) -> list[dict]:
     """Supported Claude models this API key may use, recommended first, then cheapest first."""
     client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=1, timeout=15)
     models = []
-    async for m in client.models.list():
-        if m.id in MODEL_PRICES:
-            models.append({"id": m.id, "name": m.display_name, "cost": model_cost(m.id),
-                           "recommended": m.id == RECOMMENDED_MODEL})
+    try:
+        async for m in client.models.list():
+            if m.id in MODEL_PRICES:
+                models.append({"id": m.id, "name": m.display_name, "cost": model_cost(m.id),
+                               "recommended": m.id == RECOMMENDED_MODEL})
+    except anthropic.APIError as e:
+        raise LLMUnavailable(_claude_error(e)) from e
+    finally:
+        await client.close()
     models.sort(key=lambda m: (not m["recommended"], m["cost"]["factor"]))
     return models
 
@@ -142,15 +147,15 @@ class _Claude:
                 resp = await self.client.messages.parse(output_format=output_format, **kwargs)
         except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError,
                 anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-            raise LLMUnavailable(str(e)) from e
+            raise LLMUnavailable(_claude_error(e)) from e
         except anthropic.BadRequestError as e:
             msg = str(e).lower()
             if "usage limit" in msg or "credit balance" in msg or "billing" in msg:
-                raise LLMUnavailable(str(e)) from e
+                raise LLMUnavailable(_claude_error(e)) from e
             raise
         except anthropic.APIStatusError as e:
             if e.status_code >= 500:
-                raise LLMUnavailable(str(e)) from e
+                raise LLMUnavailable(_claude_error(e)) from e
             raise
         health.ok("llm")
 
@@ -171,10 +176,19 @@ class _Claude:
         try:
             await self.client.models.retrieve(self.model)
         except anthropic.APIError as e:
-            raise LLMUnavailable(str(e)) from e
+            raise LLMUnavailable(_claude_error(e)) from e
 
     async def close(self) -> None:
         await self.client.close()
+
+
+def _claude_error(e: anthropic.APIError) -> str:
+    """'HTTP 401: invalid x-api-key' instead of the SDK's full error dict."""
+    if isinstance(e, anthropic.APIStatusError):
+        body = e.body if isinstance(e.body, dict) else {}
+        err = body.get("error") if isinstance(body.get("error"), dict) else {}
+        return f"HTTP {e.status_code}: {err.get('message') or e.message}"
+    return describe_error(e)
 
 
 # Substrings of model ids that are not chat models (embeddings, speech, images, …).

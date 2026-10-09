@@ -554,7 +554,7 @@ function fieldRow(f) {
   const pickerError = { [pf.model]: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
   if (pickerError && input.tagName !== "SELECT") info.push(tr("options_fallback", { error: pickerError }));
   return h("div", { class: "field" },
-    h("label", { for: id }, T["f_" + f.name] || f.name, f.required ? h("span", { class: "req", title: T.required }, " *") : "",
+    h("label", { for: id }, T["f_" + f.name] || f.name, f.required ? h("span", { class: "req", title: T.required }, "\u00a0*") : "",
       h("span", { class: "name" }, f.name)),
     h("div", {}, input,
       f.name === "CLAUDE_MODEL" ? modelWarning(current || f.default) : null,
