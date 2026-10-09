@@ -6,6 +6,9 @@
 # Run as root. Running it again updates to the latest version; settings and data are kept.
 # Overridable: CORSARR_REPO, CORSARR_BRANCH, CORSARR_DIR (code), CORSARR_DATA (data), CORSARR_PORT.
 set -euo pipefail
+# A locale every Debian/Ubuntu has – avoids "Setting locale failed" warnings when the calling shell
+# (SSH, Proxmox console) uses a locale that isn't installed here.
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 REPO="${CORSARR_REPO:-https://github.com/ironiro/corsarr.git}"
 BRANCH="${CORSARR_BRANCH:-main}"
