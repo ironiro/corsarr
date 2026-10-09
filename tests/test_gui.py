@@ -119,6 +119,13 @@ class FakeRuntime:
     async def check(self):
         self.checks += 1
 
+    async def restore(self, settings, database):
+        from corsarr import backup
+        self.db.conn.close()
+        backup.restore(self.cfg.data_dir, settings, database)
+        self.cfg = config.load()
+        self.db = DB(self.cfg.db_path)
+
 
 def with_client(test):
     """Run `test(client, runtime)` against the real web app with a fake runtime."""
@@ -327,4 +334,46 @@ def test_interface_assets_carry_the_version_so_updates_are_not_cached(env, monke
         assert '/static/app.js?v=abcdef123456"' in html and '/static/style.css?v=abcdef123456"' in html
         await login(client)
         assert (await (await client.get("/api/status")).json())["version"] == "abcdef1234567890"
+    with_client(test)
+
+
+def test_backup_round_trip_needs_the_backups_own_password(env):
+    from aiohttp import FormData
+
+    def upload(data, password):
+        form = FormData()
+        form.add_field("file", data, filename="backup.zip", content_type="application/zip")
+        form.add_field("password", password)
+        return form
+
+    async def test(client, rt):
+        await login(client)
+        await client.put("/api/settings", headers=H, json={"pirate_enabled": False})
+        assert (await client.post("/api/backup", headers=H, json={"password": "short"})).status == 400
+        r = await client.post("/api/backup", headers=H, json={"password": "backup-secret"})
+        assert r.status == 200 and r.headers["Content-Disposition"].startswith("attachment")
+        data = await r.read()
+        assert data[:2] == b"PK" and b"sk-test" not in data  # encrypted: the API key is not readable
+
+        # change things after the backup – restoring must bring the old state back
+        await client.put("/api/settings", headers=H, json={"pirate_enabled": True})
+        await client.put("/api/config", headers=H, json={"values": {"JELLYFIN_USER": "Changed"}})
+        r = await client.post("/api/restore", headers=H, data=upload(data, "pw"))  # admin password ≠ backup password
+        assert r.status == 400 and "password" in (await r.json())["error"].lower()
+        r = await client.post("/api/restore", headers=H, data=upload(b"PK not a zip", "backup-secret"))
+        assert r.status == 400
+        r = await client.post("/api/restore", headers=H, data=upload(data, "backup-secret"))
+        assert r.status == 200, await r.text()
+        assert rt.db.settings()["pirate_enabled"] is False and rt.cfg.jellyfin_user == "Wohnzimmer"
+        assert rt.cfg.sources["ANTHROPIC_API_KEY"] == "gui"  # values from the environment are in the backup too
+        assert any((rt.cfg.data_dir / "backups").glob("pre-restore-*/corsarr.db"))  # old data kept
+    with_client(test)
+
+
+def test_backup_needs_an_admin_password(env):
+    env.delenv("ADMIN_PASSWORD")
+
+    async def test(client, rt):
+        r = await client.post("/api/backup", headers=H, json={"password": "backup-secret"})
+        assert r.status == 403
     with_client(test)

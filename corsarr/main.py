@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from . import config, web
+from . import backup, config, web
 from .bot import CorsarrBot
 from .checks import run_checks
 from .db import DB, DatabaseTooNew
@@ -76,12 +76,7 @@ class Runtime:
         self.cfg = cfg
         self.db: DB | None = None
         self.db_error = ""
-        try:
-            self.db = DB(cfg.db_path)
-        except DatabaseTooNew as e:
-            # Keep the web interface up so the problem is visible there; the bot itself can't start.
-            self.db_error = t("log.db_too_new", found=e.found, path=cfg.db_path)
-            log.error(self.db_error)
+        self._open_db()
         self.started_at = time.time()
         self.state = "stopped"  # 'starting' | 'running' | 'unconfigured' | 'error' | 'stopped'
         self.state_detail = ""
@@ -93,6 +88,15 @@ class Runtime:
         self.llm: LLM | None = None
         self._lock = asyncio.Lock()
 
+    def _open_db(self) -> None:
+        self.db, self.db_error = None, ""
+        try:
+            self.db = DB(self.cfg.db_path)
+        except DatabaseTooNew as e:
+            # Keep the web interface up so the problem is visible there; the bot itself can't start.
+            self.db_error = t("log.db_too_new", found=e.found, path=self.cfg.db_path)
+            log.error(self.db_error)
+
     # --- lifecycle -------------------------------------------------------------
     async def start(self) -> None:
         async with self._lock:
@@ -101,6 +105,20 @@ class Runtime:
     async def stop(self) -> None:
         async with self._lock:
             await self._stop()
+
+    async def restore(self, settings: dict, database: bytes | None) -> None:
+        """Replace database and settings with a backup's and start again (see backup.py)."""
+        async with self._lock:
+            await self._stop()
+            if self.db is not None:
+                self.db.conn.close()
+            keep = backup.restore(self.cfg.data_dir, settings, database)
+            log.info(t("log.backup_restored", keep=keep))
+            self.cfg = config.load()
+            logging.getLogger().setLevel(self.cfg.log_level)
+            self._open_db()
+            await self._start()
+        await self.check()
 
     async def restart(self) -> None:
         async with self._lock:

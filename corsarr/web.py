@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 from aiohttp import web
 
-from . import arr, config, llm, monitor, updates
+from . import arr, backup, config, llm, monitor, updates
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
@@ -291,6 +291,42 @@ async def api_update_start(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+# --- GUI: backup and restore ------------------------------------------------------
+
+async def api_backup(request: web.Request) -> web.Response:
+    """Encrypted zip of database and settings. Only with an admin password, since it holds the API keys."""
+    rt = _rt(request)
+    if not rt.cfg.admin_password:
+        return web.json_response({"error": t("backup.needs_admin_password")}, status=403)
+    password = str((await _json_body(request)).get("password") or "")
+    try:
+        data = await asyncio.to_thread(backup.create, rt.cfg, password)
+    except backup.BackupError as e:
+        return web.json_response({"error": t(e.key, **e.values)}, status=400)
+    log.info(t("log.backup_created", remote=_remote(request)))
+    name = f"corsarr-backup-{time.strftime('%Y%m%d-%H%M')}.zip"
+    return web.Response(body=data, content_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def api_restore(request: web.Request) -> web.Response:
+    """Restore a backup (multipart: file, password). Without an admin password – e.g. on a fresh
+    installation – no login is needed; the backup's own password still is."""
+    rt = _rt(request)
+    form = await request.post()
+    upload, password = form.get("file"), str(form.get("password") or "")
+    if not isinstance(upload, web.FileField):
+        return web.json_response({"error": t("backup.not_a_backup")}, status=400)
+    try:
+        manifest, settings, database = backup.read(upload.file.read(), password)
+    except backup.BackupError as e:
+        log.warning(t("log.restore_failed", remote=_remote(request), error=t(e.key, **e.values)))
+        return web.json_response({"error": t(e.key, **e.values)}, status=400)
+    await rt.restore(settings, database)
+    return web.json_response({"ok": True, "version": manifest.get("version", ""),
+                              "created": manifest.get("created", ""), **status_payload(rt)})
+
+
 async def api_events(request: web.Request) -> web.Response:
     try:
         after = int(request.query.get("after", "0"))
@@ -416,7 +452,8 @@ async def api_settings_save(request: web.Request) -> web.Response:
 # --- app ---------------------------------------------------------------------------
 
 def build_app(runtime: "Runtime") -> web.Application:
-    app = web.Application(middlewares=[auth_middleware])
+    # Uploads: backups for restoring can be larger than aiohttp's default of 1 MB.
+    app = web.Application(middlewares=[auth_middleware], client_max_size=backup.MAX_SIZE + 1024 * 1024)
     app[RUNTIME] = runtime
     app[SESSIONS] = {}
     app[TASKS] = set()
@@ -437,6 +474,8 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/options/models", api_models)
     app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
     app.router.add_post("/api/update", api_update_start)
+    app.router.add_post("/api/backup", api_backup)
+    app.router.add_post("/api/restore", api_restore)
     app.router.add_get("/api/config", api_config)
     app.router.add_put("/api/config", api_config_save)
     app.router.add_put("/api/settings", api_settings_save)
