@@ -942,10 +942,10 @@ function stepWebhooks() {
       h("div", { class: "row wrap" },
         h("input", { placeholder: tr("wiz_arr_url", { name }), value: a.url, oninput: e => { a.url = e.target.value.trim(); } }),
         h("input", { type: "password", placeholder: saved ? T.secret_set : T.wiz_arr_key, value: a.key,
-                     autocomplete: "new-password", oninput: e => { a.key = e.target.value.trim(); } }),
-        h("button", { class: "btn", disabled: wiz.busy, onclick: connect }, tr("wiz_arr_connect", { name }))),
+                     autocomplete: "new-password", oninput: e => { a.key = e.target.value.trim(); } })),
       h("label", { class: "switch" }, h("input", { type: "checkbox", checked: a.remember,
         onchange: e => { a.remember = e.target.checked; } }), tr("wiz_arr_remember", { name })),
+      h("button", { class: "btn", disabled: wiz.busy, onclick: connect }, tr("wiz_arr_connect", { name })),
       a.done ? h("div", { class: "notice ok" }, tr("wiz_arr_done", { name })) : null,
       a.done?.telegram?.length ? h("div", { class: "notice warn" }, tr("wiz_arr_telegram", { name, names: a.done.telegram.join(", ") })) : null,
       h("details", {}, h("summary", {}, T.wiz_manual), copyRow("URL", w[kind])));
