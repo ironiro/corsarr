@@ -19,6 +19,11 @@ say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Please run as root."
+# Never install directly on a Proxmox VE host – that is what deploy/proxmox.sh (a container) is for.
+if [ -d /etc/pve ] || command -v pveversion >/dev/null 2>&1; then
+    die "This is a Proxmox VE host. To create a container with Corsarr, run instead:
+    bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)\""
+fi
 command -v apt-get >/dev/null || die "Only for Debian/Ubuntu (apt)."
 command -v systemctl >/dev/null || die "systemd is missing – for Docker use docker-compose.yml instead."
 

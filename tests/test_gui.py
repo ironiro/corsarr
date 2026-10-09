@@ -59,10 +59,16 @@ def test_every_i18n_key_used_in_code_exists():
 
 
 def test_language_switch():
-    i18n.set_language("en")
-    assert i18n.t("bot.btn_request") == "📥 Request"
-    i18n.set_language("xx")  # unknown falls back to German
+    i18n.set_language("de")
     assert i18n.t("bot.btn_request") == "📥 Anfragen"
+    i18n.set_language("xx")  # unknown falls back to English
+    assert i18n.t("bot.btn_request") == "📥 Request"
+
+
+def test_english_is_the_default(env):
+    env.delenv("LANGUAGE", raising=False)
+    cfg = config.load()
+    assert cfg.language == "en" and i18n.default_language() == "en"
 
 
 # --- config --------------------------------------------------------------------------

@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY corsarr ./corsarr
 
 # Runs as an unprivileged user; /data holds database, logs and the GUI's config.json.
-RUN useradd --system --uid 1000 --home-dir /data corsarr \
+RUN useradd --uid 1000 --no-create-home --home-dir /data --shell /usr/sbin/nologin corsarr \
     && mkdir -p /data && chown corsarr:corsarr /data
 USER corsarr
 

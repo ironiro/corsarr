@@ -5,7 +5,7 @@ at `http://<ip>:8787/`, and everything else is entered there (→ [Setup](Setup.
 
 | Method | Best for |
 | --- | --- |
-| [Proxmox LXC](#proxmox-lxc-recommended) | Proxmox servers – one command, updates with the same command |
+| [Proxmox LXC](#proxmox-lxc-recommended) | Proxmox servers – one command in the host shell creates the container |
 | [Docker](#docker) | Any Docker host, Synology, Unraid, Raspberry Pi |
 | [Manual](#manual-install-on-linux) | Other Linux machines with systemd |
 | [macOS / Windows](#macos-and-windows-for-trying-it-out) | Trying it out on your own computer |
@@ -17,51 +17,77 @@ The bot must **reach Jellyfin and Jellyseerr**, and **Jellyfin, Sonarr and Radar
 
 ## Proxmox LXC (recommended)
 
-### 1. Create the container
+### Install with one command
 
-In the Proxmox UI, *Create CT*:
+Open the shell of your **Proxmox host** (*Datacenter → your node → Shell*) and run:
 
-| Setting | Value |
-| --- | --- |
-| Template | Debian 12 (or Ubuntu 22.04/24.04) |
-| Unprivileged container | yes |
-| Disk | 4 GB |
-| CPU | 1 core |
-| Memory | 512 MB (swap 512 MB) |
-| Network | DHCP or static IP – **static recommended**, since Jellyfin, Sonarr and Radarr use it as the webhook address |
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)"
+```
 
-Start the container and log in as root in the Proxmox *Console*.
+The script
+1. downloads the Debian 12 container template if it isn't there yet,
+2. creates an unprivileged container named `corsarr` (next free id, 1 core, 512 MB RAM, 4 GB disk, DHCP,
+   starts on boot),
+3. installs Corsarr inside it (see [what the installer does](#what-the-installer-does-inside-the-container)),
+4. prints the address of the web interface.
 
-### 2. Install
+Nothing is installed on the Proxmox host itself.
+
+**Static IP (recommended):** Jellyfin, Sonarr and Radarr use the container's address for their webhooks, so
+it should not change. Either reserve the address in your router, or set it when creating the container:
+
+```bash
+CORSARR_IP=192.168.1.50/24 CORSARR_GW=192.168.1.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)"
+```
+
+Other settings, all optional: `CORSARR_CTID` (container id), `CORSARR_HOSTNAME`, `CORSARR_STORAGE` (storage for
+the disk, default: the first active one for containers), `CORSARR_DISK` (GB), `CORSARR_CORES`, `CORSARR_RAM`
+(MB), `CORSARR_BRIDGE` (default `vmbr0`), `CORSARR_BRANCH`.
+
+### Update
+
+In the Proxmox host shell (replace `105` with your container id):
+
+```bash
+pct exec 105 -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"
+```
+
+Code and dependencies are updated, settings and data are kept, and the service restarts.
+
+### Remove
+
+```bash
+pct stop 105 && pct destroy 105
+```
+
+This deletes the container including all Corsarr data.
+
+### Alternative: install into an existing container
+
+If you prefer to create the container yourself (*Create CT* in the Proxmox UI: Debian 12 or Ubuntu
+22.04/24.04, unprivileged, 1 core, 512 MB, 4 GB), open **the container's** console and run:
 
 ```bash
 apt-get update && apt-get install -y curl
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh)"
 ```
 
-The script
+> Run this inside the container, not in the Proxmox host shell. On a Proxmox host the script stops and points
+> you to the one-command install above.
+
+### What the installer does inside the container
+
 1. installs `git` and `python3-venv`,
 2. creates the system user `corsarr`,
 3. downloads the code to `/opt/corsarr` and sets up its own Python environment,
 4. sets up the systemd service `corsarr` (starts automatically, including after a container restart),
 5. prints the address of the web interface.
 
-Data (database, logs, settings from the web interface) lives in `/var/lib/corsarr`.
-
-### 3. Update
-
-Run the same command again. Code and dependencies are updated, settings and data are kept, and the service
-restarts.
-
-### Advanced options (optional)
-
-You can set these environment variables before running the script: `CORSARR_BRANCH` (another branch), `CORSARR_DIR` (code directory),
-`CORSARR_DATA` (data directory), `CORSARR_PORT` (for the startup check if you changed the port),
-`CORSARR_REPO` (your own fork). Example:
-
-```bash
-CORSARR_BRANCH=dev bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh)"
-```
+Data (database, logs, settings from the web interface) lives in `/var/lib/corsarr` inside the container.
+Running `install.sh` again updates Corsarr. It accepts `CORSARR_BRANCH`, `CORSARR_DIR` (code directory),
+`CORSARR_DATA` (data directory), `CORSARR_PORT` (for the startup check if you changed the port) and
+`CORSARR_REPO` (your own fork).
 
 ---
 

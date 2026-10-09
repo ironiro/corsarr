@@ -41,7 +41,7 @@ class FeedbackIntent(BaseModel):
 
 
 class Understanding(BaseModel):
-    language: str = Field("de", description="ISO 639-1 code of the language the message is written in, e.g. de, en")
+    language: str = Field("en", description="ISO 639-1 code of the language the message is written in, e.g. de, en")
     intent: Literal["recommend", "new_only", "settings", "feedback", "chat"]
     media_types: list[Literal["movie", "tv"]] = Field(description="empty = movies and series")
     jellyfin_genres: list[str] = Field(description="only names from the Jellyfin genre list")

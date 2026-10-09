@@ -45,7 +45,7 @@ FIELDS: tuple[Field, ...] = (
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
     Field("WEBHOOK_SECRET", "web", required=True),
     Field("ADMIN_PASSWORD", "web", secret=True),
-    Field("LANGUAGE", "system", default="de", kind="choice", choices=LANGUAGES),
+    Field("LANGUAGE", "system", default="en", kind="choice", choices=LANGUAGES),
     Field("LOG_LEVEL", "system", default="INFO", kind="choice",
           choices=("DEBUG", "INFO", "WARNING", "ERROR")),
     Field("DATA_DIR", "system", default="./data", editable=False, app_restart=True),

@@ -36,7 +36,7 @@ To restart only the Telegram part (e.g. after a network problem): web interface 
 
 ## Update
 
-- **LXC:** run the [install script](Installation.md#proxmox-lxc-recommended) again.
+- **LXC:** in the Proxmox host shell `pct exec <id> -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"` (see [Installation](Installation.md#update)).
 - **Docker:** `docker compose pull && docker compose up -d`
 - **Manual:** `cd /opt/corsarr && git pull && .venv/bin/pip install -r requirements.txt && systemctl restart corsarr`
 
