@@ -37,7 +37,7 @@ Browser ────────────▶ web.py ──▶ config.py / mon
 | `profile.py` | Taste profile: genre weights from history/favourites, feedback, traits; title lists for Claude |
 | `feedback.py` | Webhook processing (movie end, season end, pause, abort), deadlines, storing ratings |
 | `arr.py` | Store Sonarr/Radarr imports and bundle them into messages |
-| `llm.py` | Claude calls with structured output, prompt caching, repetition guard |
+| `llm.py` | Language model calls with structured output, repetition guard; Claude via the Anthropic SDK (with prompt caching), the untested providers via the OpenAI-compatible chat API (httpx) |
 | `persona.py` | Character choice and post-processing (emoji per line) |
 | `jellyfin.py`, `jellyseerr.py` | API clients |
 | `db.py` | SQLite schema, migrations, queries |

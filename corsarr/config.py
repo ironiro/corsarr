@@ -14,6 +14,24 @@ from .i18n import LANGUAGES, set_language, t
 
 OVERRIDES_FILE = "config.json"
 
+# Language model providers. Only Claude is tested; the others use the OpenAI-compatible API.
+PROVIDERS = ("claude", "openai", "gemini", "ollama", "lmstudio")
+RECOMMENDED_PROVIDER = "claude"
+PROVIDER_NAMES = {"claude": "Claude", "openai": "OpenAI (ChatGPT)", "gemini": "Google Gemini",
+                  "ollama": "Ollama", "lmstudio": "LM Studio"}
+LOCAL_PROVIDERS = ("ollama", "lmstudio")
+DEFAULT_URLS = {"openai": "https://api.openai.com/v1",
+                "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+                "ollama": "http://localhost:11434", "lmstudio": "http://localhost:1234"}
+# Which fields belong to which provider: API key ('key'), server address ('url') and model.
+PROVIDER_FIELDS = {
+    "claude": {"key": "ANTHROPIC_API_KEY", "model": "CLAUDE_MODEL"},
+    "openai": {"key": "OPENAI_API_KEY", "model": "OPENAI_MODEL"},
+    "gemini": {"key": "GEMINI_API_KEY", "model": "GEMINI_MODEL"},
+    "ollama": {"url": "OLLAMA_URL", "model": "OLLAMA_MODEL"},
+    "lmstudio": {"url": "LMSTUDIO_URL", "model": "LMSTUDIO_MODEL"},
+}
+
 
 @dataclass(frozen=True)
 class Field:
@@ -26,6 +44,7 @@ class Field:
     choices: tuple[str, ...] = ()
     app_restart: bool = False  # only takes effect after restarting the whole program
     editable: bool = True
+    provider: str = ""  # only used (and only required) when this language model provider is selected
 
 
 FIELDS: tuple[Field, ...] = (
@@ -33,8 +52,18 @@ FIELDS: tuple[Field, ...] = (
     Field("TELEGRAM_CHAT_ID", "telegram", required=True, kind="int"),
     # Optional separate chat for Sonarr/Radarr download messages; empty = the group above.
     Field("NOTIFY_CHAT_ID", "telegram", kind="int"),
-    Field("ANTHROPIC_API_KEY", "claude", required=True, secret=True),
-    Field("CLAUDE_MODEL", "claude", default="claude-haiku-5-5"),
+    Field("LLM_PROVIDER", "llm", default=RECOMMENDED_PROVIDER, kind="choice", choices=PROVIDERS),
+    Field("ANTHROPIC_API_KEY", "llm", required=True, secret=True, provider="claude"),
+    Field("CLAUDE_MODEL", "llm", default="claude-haiku-5-5", provider="claude"),
+    Field("OPENAI_API_KEY", "llm", required=True, secret=True, provider="openai"),
+    Field("OPENAI_MODEL", "llm", required=True, provider="openai"),
+    Field("GEMINI_API_KEY", "llm", required=True, secret=True, provider="gemini"),
+    Field("GEMINI_MODEL", "llm", required=True, provider="gemini"),
+    Field("OLLAMA_URL", "llm", required=True, kind="url", default=DEFAULT_URLS["ollama"], provider="ollama"),
+    Field("OLLAMA_MODEL", "llm", required=True, provider="ollama"),
+    Field("LMSTUDIO_URL", "llm", required=True, kind="url", default=DEFAULT_URLS["lmstudio"],
+          provider="lmstudio"),
+    Field("LMSTUDIO_MODEL", "llm", required=True, provider="lmstudio"),
     Field("JELLYFIN_URL", "jellyfin", required=True, kind="url"),
     Field("JELLYFIN_API_KEY", "jellyfin", required=True, secret=True),
     Field("JELLYFIN_USER", "jellyfin", required=True),
@@ -70,7 +99,10 @@ class Config:
     # --- typed accessors for the bot ------------------------------------
     telegram_token = property(lambda self: self.get("TELEGRAM_BOT_TOKEN"))
     anthropic_api_key = property(lambda self: self.get("ANTHROPIC_API_KEY"))
-    model = property(lambda self: self.get("CLAUDE_MODEL"))
+    llm_provider = property(lambda self: self.get("LLM_PROVIDER") or RECOMMENDED_PROVIDER)
+    model = property(lambda self: self._llm("model"))
+    llm_api_key = property(lambda self: self._llm("key"))
+    llm_url = property(lambda self: self._llm("url").rstrip("/"))
     jellyfin_url = property(lambda self: self.get("JELLYFIN_URL").rstrip("/"))
     jellyfin_api_key = property(lambda self: self.get("JELLYFIN_API_KEY"))
     jellyfin_user = property(lambda self: self.get("JELLYFIN_USER"))
@@ -81,6 +113,10 @@ class Config:
     admin_password = property(lambda self: self.get("ADMIN_PASSWORD"))
     language = property(lambda self: self.get("LANGUAGE"))
     log_level = property(lambda self: self.get("LOG_LEVEL"))
+
+    def _llm(self, kind: str) -> str:
+        name = PROVIDER_FIELDS.get(self.llm_provider, {}).get(kind)
+        return self.get(name) if name else ""
 
     @property
     def chat_id(self) -> int:
@@ -121,6 +157,11 @@ def validate(f: Field, value: str) -> str | None:
     if f.kind == "choice" and value not in f.choices:
         return t("cfg.not_choice", name=f.name, choices=", ".join(f.choices))
     return None
+
+
+def active(f: Field, values: dict[str, str]) -> bool:
+    """Fields of a provider that is not selected are ignored (and not required)."""
+    return not f.provider or f.provider == values.get("LLM_PROVIDER")
 
 
 def read_env_file() -> dict[str, str]:
@@ -197,5 +238,5 @@ def load() -> Config:
 
     # Language first, so error messages already come out in it.
     set_language(values["LANGUAGE"])
-    errors = {f.name: err for f in FIELDS if (err := validate(f, values[f.name]))}
+    errors = {f.name: err for f in FIELDS if active(f, values) and (err := validate(f, values[f.name]))}
     return Config(values=values, sources=sources, data_dir=data_dir, errors=errors)

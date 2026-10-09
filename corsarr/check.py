@@ -1,6 +1,6 @@
 """Connectivity check: python -m corsarr.check
 
-Tests Jellyfin, Jellyseerr, Claude and Telegram with the configured environment, without
+Tests Jellyfin, Jellyseerr, the language model and Telegram with the configured environment, without
 posting anything to the group.
 """
 from __future__ import annotations
@@ -8,15 +8,17 @@ from __future__ import annotations
 import asyncio
 
 from . import config
+from .config import PROVIDER_NAMES
 from .checks import run_checks
 
-LABELS = {"jellyfin": "Jellyfin", "jellyseerr": "Jellyseerr", "claude": "Claude API", "telegram": "Telegram"}
+LABELS = {"jellyfin": "Jellyfin", "jellyseerr": "Jellyseerr", "telegram": "Telegram"}
 
 
 def main() -> None:
     cfg = config.load()
     for err in cfg.errors.values():
         print(f"⚠️  {err}")
+    LABELS["llm"] = PROVIDER_NAMES.get(cfg.llm_provider, cfg.llm_provider)
     results = asyncio.run(run_checks(cfg, ping=True))
     for name, (ok, detail) in results.items():
         print(f"{'✅' if ok else '❌'} {LABELS[name]}: {detail}")

@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
-SERVICES = ("telegram", "claude", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr")
+SERVICES = ("telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr")
 
 
 @dataclass

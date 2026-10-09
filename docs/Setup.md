@@ -42,6 +42,21 @@ prepaid credit. A few dollars last a long time ([what does it cost?](Home.md#wha
 Keep the key private: anyone who has it can spend your credit. Corsarr stores it only in its data directory
 and never shows it again in the web interface.
 
+### Other providers (untested)
+
+Instead of Claude you can select OpenAI, Google Gemini, Ollama or LM Studio under *Configuration → AI
+provider*. **These are not tested** – Claude is recommended. Where to get what you need:
+
+- **OpenAI:** API key from [platform.openai.com](https://platform.openai.com/) (*API keys*); prepaid credit
+  and a usage limit are set there too.
+- **Gemini:** API key from [Google AI Studio](https://aistudio.google.com/) (*Get API key*).
+- **Ollama:** install [Ollama](https://ollama.com/), pull a model (`ollama pull <model>`), make it reachable
+  from the network (`OLLAMA_HOST=0.0.0.0`) and enter `http://<ip>:11434`.
+- **LM Studio:** download a model in [LM Studio](https://lmstudio.ai/), start the local server (*Developer* →
+  *Start server*, enable *Serve on local network*) and enter `http://<ip>:1234`.
+
+Details and limitations: [Configuration](Configuration.md#language-model-ai-provider).
+
 If the limit is reached or the API is unreachable, the bot says so once in the group, stops taking requests
 and checks every 5 minutes whether the API is available again. Once it is, the bot announces that it is back.
 

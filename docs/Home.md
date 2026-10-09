@@ -60,3 +60,12 @@ question per evening – comes to around 10–20 cents a month, and $5 lasts wel
 
 Prices can change; the [Claude Console](https://console.anthropic.com/) shows what you actually spent under
 *Usage*. Set a monthly spend limit there so there are never surprises.
+
+These figures apply to Claude Haiku. Other Claude models cost 20–100 times as much. The untested alternative
+providers (OpenAI, Gemini) have their own prices; local models via Ollama or LM Studio cost nothing per request.
+
+> [!WARNING]
+> **Cost disclaimer:** Corsarr calls paid AI services with *your own* API key, and you alone pay for that
+> usage. The author accepts **no responsibility or liability whatsoever for API costs** – including
+> unexpectedly high costs caused by bugs, misconfiguration, expensive models or misuse. Always set a spending
+> limit with your provider. Use at your own risk.

@@ -290,8 +290,8 @@ def test_claude_model_picker_marks_haiku_and_prices(env, monkeypatch):
     from corsarr import llm
     used = []
 
-    async def fake_models(key):
-        used.append(key)
+    async def fake_models(provider, key, url=""):
+        used.append((provider, key))
         return [{"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "recommended": True,
                  "cost": llm.model_cost("claude-haiku-5-5")},
                 {"id": "claude-fable-5-1", "name": "Claude Fable 5.1", "recommended": False,
@@ -300,8 +300,8 @@ def test_claude_model_picker_marks_haiku_and_prices(env, monkeypatch):
 
     async def test(client, rt):
         await login(client)
-        res = await (await client.post("/api/options/claude-models", headers=H, json={})).json()
-        assert used == ["sk-test"] and res["recommended"] == "claude-haiku-5-5"
+        res = await (await client.post("/api/options/models", headers=H, json={})).json()
+        assert used == [("claude", "sk-test")] and res["recommended"] == "claude-haiku-5-5"
         fable = res["models"][1]["cost"]
         assert fable["factor"] == 100 and fable["per_suggestion"] == 0.2
     with_client(test)

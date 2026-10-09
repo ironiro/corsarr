@@ -197,6 +197,9 @@ def status_payload(rt: "Runtime") -> dict:
         "language": language(),
         "auth": bool(rt.cfg.admin_password),
         "version": updates.current_version() or "",
+        "llm": {"provider": rt.cfg.llm_provider, "model": rt.cfg.model,
+                "name": config.PROVIDER_NAMES.get(rt.cfg.llm_provider, rt.cfg.llm_provider),
+                "recommended": rt.cfg.llm_provider == config.RECOMMENDED_PROVIDER},
     }
 
 
@@ -224,15 +227,23 @@ async def _json_body(request: web.Request) -> dict:
     return body if isinstance(body, dict) else {}
 
 
-async def api_claude_models(request: web.Request) -> web.Response:
-    """Models for the picker. Uses a key typed into the form (not saved yet), else the saved one."""
+async def api_models(request: web.Request) -> web.Response:
+    """Models for the picker of the selected provider. Uses a key or address typed into the form
+    (not saved yet), else the saved one."""
     rt = _rt(request)
-    key = str((await _json_body(request)).get("api_key") or rt.cfg.anthropic_api_key)
-    if not key:
+    body = await _json_body(request)
+    provider = str(body.get("provider") or rt.cfg.llm_provider)
+    if provider not in config.PROVIDERS:
+        return web.json_response({"models": [], "error": t("cfg.not_choice", name="LLM_PROVIDER",
+                                                              choices=", ".join(config.PROVIDERS))})
+    names = config.PROVIDER_FIELDS[provider]
+    key = str(body.get("api_key") or (rt.cfg.get(names["key"]) if "key" in names else ""))
+    url = str(body.get("url") or (rt.cfg.get(names["url"]) if "url" in names else ""))
+    if "key" in names and not key:
         return web.json_response({"models": [], "error": t("gui.options_need_key")})
     try:
-        models = await llm.available_models(key)
-    except Exception as e:  # wrong key, no network – the form falls back to a text field
+        models = await llm.available_models(provider, key, url)
+    except Exception as e:  # wrong key, no network, server not running – the form falls back to a text field
         return web.json_response({"models": [], "error": monitor.describe_error(e)})
     return web.json_response({"models": models, "recommended": llm.RECOMMENDED_MODEL, "error": ""})
 
@@ -290,7 +301,7 @@ def config_payload(rt: "Runtime") -> dict:
         fields.append({
             "name": f.name, "group": f.group, "required": f.required, "secret": f.secret,
             "kind": f.kind, "choices": list(f.choices), "editable": f.editable,
-            "app_restart": f.app_restart, "default": f.default,
+            "app_restart": f.app_restart, "default": f.default, "provider": f.provider,
             "value": "" if f.secret else value, "is_set": bool(value),
             "source": cfg.sources.get(f.name, "default"), "error": cfg.errors.get(f.name, ""),
         })
@@ -300,7 +311,13 @@ def config_payload(rt: "Runtime") -> dict:
         lo, hi = SETTING_LIMITS.get(key, (None, None))
         behaviour.append({"key": key, "value": settings[key], "kind": type(default).__name__,
                           "min": lo, "max": hi})
-    return {"fields": fields, "settings": behaviour}
+    return {"fields": fields, "settings": behaviour, "providers": _providers()}
+
+
+def _providers() -> list[dict]:
+    return [{"id": p, "name": config.PROVIDER_NAMES[p], "recommended": p == config.RECOMMENDED_PROVIDER,
+             "local": p in config.LOCAL_PROVIDERS, "fields": config.PROVIDER_FIELDS[p]}
+            for p in config.PROVIDERS]
 
 
 async def api_config(request: web.Request) -> web.Response:
@@ -406,7 +423,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/restart", api_restart)
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/update", api_update)
-    app.router.add_post("/api/options/claude-models", api_claude_models)
+    app.router.add_post("/api/options/models", api_models)
     app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
     app.router.add_post("/api/update", api_update_start)
     app.router.add_get("/api/config", api_config)

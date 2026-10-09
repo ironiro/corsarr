@@ -4,7 +4,7 @@ A Telegram bot for movie night. Corsarr suggests movies and series to your group
 library first, plus new titles via Jellyseerr. After you've watched something, it asks how you liked it and learns your taste.
 It also reports what Sonarr and Radarr downloaded, grouped together rather than one message per episode. It speaks English and
 German and answers in the language you write in – as a 🏴‍☠️ pirate, a 📱 Gen Z character or in a neutral voice. Powered by Claude Haiku via the Claude API, with a web interface for status, events and
-configuration.
+configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are **untested**.
 
 ![Corsarr in a Telegram group: a suggestion card, feedback after the movie and download notifications](docs/images/telegram-chat.jpg)
 
@@ -22,11 +22,20 @@ configuration.
   ("📦 Grey's Anatomy: 48 episodes from seasons 1–4 are ready").
 - **Web interface** on port 8787: connection status of every service, live event log, full configuration.
   No config file needed.
+- **Language model:** Claude (recommended and tested). OpenAI (ChatGPT), Google Gemini, Ollama and LM Studio
+  are available as alternatives but **not tested** – suggestions may be worse or fail. See
+  [Configuration](docs/Configuration.md#language-model-ai-provider).
 
 ![Status page of the web interface](docs/images/status.jpg)
 
 **Costs:** Corsarr is free; Claude API usage is billed by Anthropic. One suggestion request costs about a fifth
 of a cent, so $5 of credit lasts well over a year of normal use ([details](docs/Home.md#what-does-it-cost)).
+
+> [!WARNING]
+> **Cost disclaimer:** Corsarr calls paid AI services with *your own* API key, and you alone pay for that usage.
+> The author accepts **no responsibility or liability whatsoever for API costs** – including unexpectedly high
+> costs caused by bugs, misconfiguration, expensive models or misuse. Always set a spending limit with your
+> provider. Use at your own risk.
 
 ## Quick start
 
@@ -43,7 +52,7 @@ curl -fsSLO https://raw.githubusercontent.com/ironiro/corsarr/main/docker-compos
 docker compose up -d
 ```
 
-Then open `http://<ip>:8787/` and enter your Telegram, Claude, Jellyfin and Jellyseerr details under **Configuration**.
+Then open `http://<ip>:8787/` and enter your Telegram, Claude (or another AI provider), Jellyfin and Jellyseerr details under **Configuration**.
 To update, see [Installation](docs/Installation.md); with Docker run `docker compose pull && docker compose up -d`.
 
 ## Documentation
@@ -51,7 +60,7 @@ To update, see [Installation](docs/Installation.md); with Docker run `docker com
 | | |
 | --- | --- |
 | [Installation](docs/Installation.md) | LXC, Docker, manual, macOS/Windows |
-| [Setup](docs/Setup.md) | Telegram bot, chat id, keys for Claude/Jellyfin/Jellyseerr |
+| [Setup](docs/Setup.md) | Telegram bot, chat id, keys for Claude (or other providers)/Jellyfin/Jellyseerr |
 | [Configuration](docs/Configuration.md) | All settings and the web interface |
 | [Webhooks](docs/Webhooks.md) | Jellyfin (feedback), Sonarr/Radarr (download notifications) |
 | [Usage](docs/Usage.md) | What to write to the bot, buttons, feedback rules |

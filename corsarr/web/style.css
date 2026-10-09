@@ -189,3 +189,6 @@ summary { cursor: pointer; color: var(--muted); }
   .ev .lv { display: none; }
   .log { height: calc(100vh - 300px); }
 }
+.notice:not(.warn):not(.error):not(.ok) { border: 1px solid var(--border); }
+.disclaimer { margin-top: 28px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.service h3 + .pill { margin-left: 8px; }

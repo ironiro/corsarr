@@ -23,6 +23,7 @@ from .feedback import FeedbackService
 from .i18n import t
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
+from . import llm as llm_module
 from .llm import LLM
 from .monitor import events, health
 from .profile import ProfileBuilder
@@ -112,7 +113,7 @@ class Runtime:
         log.info(t("log.bot_starting"))
         self.jellyfin = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
         self.seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
-        self.llm = LLM(cfg.anthropic_api_key, cfg.model)
+        self.llm = llm_module.create(cfg)
         profiles = ProfileBuilder(self.db, self.jellyfin)
         recommender = Recommender(self.db, self.jellyfin, self.seerr, self.llm, profiles)
         self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles)
@@ -152,8 +153,10 @@ class Runtime:
                    lang=cfg.language))
 
     async def _stop(self) -> None:
-        app, was_running = self.app, self.state == "running"
+        app, was_running, model = self.app, self.state == "running", self.llm
         self.app = self.corsarr = self.feedback = self.llm = None
+        if model is not None:
+            await model.close()
         if app is not None:
             try:
                 if app.updater and app.updater.running:
