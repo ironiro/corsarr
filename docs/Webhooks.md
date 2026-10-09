@@ -3,10 +3,12 @@
 With a webhook, **the other service calls the bot** – not the other way round. That's why Jellyfin, Sonarr
 and Radarr always get the address **of the bot**: `http://<bot-ip>:8787/…`.
 
-All three use the same **webhook secret**. It is generated on first start and shown in the web interface under
-*Configuration → Web server and webhook*:
+All three use the same **webhook secret**, generated on first start. The easiest way is the
+**Setup → Webhooks** step of the [setup assistant](Setup.md#the-setup-assistant): it shows the complete
+addresses with the secret filled in, each with a *Copy* button, and can create the Sonarr and Radarr webhooks
+for you. The secret itself is also under *Configuration → Webhooks*:
 
-![The webhook secret in the web interface](images/webhook-secret.jpg)
+![The webhook secret under Configuration → Webhooks](images/webhook-secret.jpg)
 
 You can see whether webhooks are arriving under **Status** (one tile per service) and under **Events**.
 
@@ -56,7 +58,13 @@ directly from Jellyfin.
 This replaces any Telegram connections set up in Sonarr and Radarr themselves. Remove those, or every message will arrive
 twice.
 
-In Sonarr or Radarr: *Settings → Connect → **+** → **Webhook***
+**Automatically:** in *Setup → Webhooks* enter the address and API key of Sonarr or Radarr (*Settings →
+General*) and click *Set up in Sonarr* / *Set up in Radarr*. Corsarr creates a webhook named `Corsarr` with
+the settings below, or updates it if one already exists, and Sonarr/Radarr test it while saving. The address
+and API key are only used for this and are **not saved** (so they are not in backups either). The assistant
+also warns if a Telegram connection is still set up there.
+
+**By hand:** in Sonarr or Radarr: *Settings → Connect → **+** → **Webhook***
 
 | Field | Sonarr | Radarr |
 | --- | --- | --- |

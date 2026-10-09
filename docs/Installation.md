@@ -1,7 +1,7 @@
 # Installation
 
-There are three ways to install Corsarr, depending on your setup. They all end the same way: the bot starts, the web interface is available
-at `http://<ip>:8787/`, and everything else is entered there (→ [Setup](Setup.md)). No config file needed.
+There are three ways to install Corsarr, depending on your setup. They all end the same way: the web interface is available
+at `http://<ip>:8787/` and its setup assistant guides you through the rest (→ [Setup](Setup.md)). No config file needed.
 
 | Method | Best for |
 | --- | --- |

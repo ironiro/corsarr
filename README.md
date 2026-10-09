@@ -25,7 +25,7 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
   encrypted **backup and restore**, and four designs to choose from. No config file needed.
 - **Language model:** Claude (recommended and tested). OpenAI (ChatGPT), Google Gemini, Ollama and LM Studio
   are available as alternatives but **not tested** – suggestions may be worse or fail. See
-  [Configuration](docs/Configuration.md#language-model-ai-provider).
+  [Configuration](docs/Configuration.md#ai-provider).
 
 ![Status page of the web interface](docs/images/status.jpg)
 
@@ -53,9 +53,11 @@ curl -fsSLO https://raw.githubusercontent.com/ironiro/corsarr/main/docker-compos
 docker compose up -d
 ```
 
-Then open `http://<ip>:8787/` and enter your Telegram, Claude (or another AI provider), Jellyfin and Jellyseerr details under **Configuration**.
+Then open `http://<ip>:8787/` – the **setup assistant** guides you through Telegram, the AI provider,
+Jellyfin, Jellyseerr and the webhooks, and tests each connection before saving it ([Setup](docs/Setup.md)).
+
 Updates come through the web interface (Status → Version) or with `docker compose pull && docker compose up -d`.
-There are **stable** and **beta** releases; pick your channel under Configuration → System
+There are **stable** and **beta** releases; pick your channel under Configuration → Interface and updates
 ([release channels](docs/Operations.md#release-channels)).
 
 ## Documentation
@@ -63,11 +65,11 @@ There are **stable** and **beta** releases; pick your channel under Configuratio
 | | |
 | --- | --- |
 | [Installation](docs/Installation.md) | LXC, Docker, manual, macOS/Windows |
-| [Setup](docs/Setup.md) | Telegram bot, chat id, keys for Claude (or other providers)/Jellyfin/Jellyseerr |
+| [Setup](docs/Setup.md) | The setup assistant, and where each value comes from (Telegram, AI provider, Jellyfin, Jellyseerr) |
 | [Configuration](docs/Configuration.md) | All settings and the web interface |
 | [Webhooks](docs/Webhooks.md) | Jellyfin (feedback), Sonarr/Radarr (download notifications) |
 | [Usage](docs/Usage.md) | What to write to the bot, buttons, feedback rules |
-| [Operations](docs/Operations.md) | Logs, updates, backups, moving to another host |
+| [Operations](docs/Operations.md) | Logs, updates and release channels, backup and restore, moving to another host |
 | [Troubleshooting](docs/Troubleshooting.md) | Common problems |
 | [Development](docs/Development.md) | Architecture, tests, adding a language |
 

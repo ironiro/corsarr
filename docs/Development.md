@@ -13,7 +13,8 @@ Windows: `.venv\Scripts\…` instead of `.venv/bin/…`. Check connections witho
 nothing): `python -m corsarr.check`.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the tests on every push and pull request and publishes the
-Docker image `ghcr.io/<owner>/corsarr` (amd64 + arm64) on pushes to `main`.
+Docker image `ghcr.io/<owner>/corsarr` (amd64 + arm64) for pushes to `main` and for release tags
+(→ [Publishing a release](#publishing-a-release)).
 
 ## Structure
 
@@ -26,7 +27,7 @@ Telegram ──▶ bot.py ──▶ llm.py (Claude: understand, pick, phrase)
 
 Jellyfin ──webhook──▶ web.py ──▶ feedback.py ──▶ bot.py (feedback question)
 Sonarr/Radarr ──────▶ web.py ──▶ arr.py ──(job, bundled)──▶ bot.py (download notification)
-Browser ────────────▶ web.py ──▶ config.py / monitor.py / checks.py
+Browser ────────────▶ web.py ──▶ config.py / monitor.py / checks.py / setup.py / backup.py / updates.py
 ```
 
 | Module | Purpose |
@@ -41,10 +42,13 @@ Browser ────────────▶ web.py ──▶ config.py / mon
 | `persona.py` | Character choice and post-processing (emoji per line) |
 | `jellyfin.py`, `jellyseerr.py` | API clients |
 | `db.py` | SQLite schema, migrations, queries |
-| `web.py` + `web/` | Web interface (HTML/JS without a build step), JSON API, webhook endpoints |
+| `web.py` + `web/` | Web interface (HTML/JS/CSS without a build step; the four designs are CSS scoped by `data-skin`), JSON API, webhook endpoints |
 | `config.py` | Fields, sources (GUI > environment > `.env` > default), validation |
 | `monitor.py` | Connection status and event buffer for the web interface |
 | `checks.py` / `check.py` | Active connection checks (web interface and command line) |
+| `setup.py` | Setup assistant: tests unsaved values, finds the Telegram group, creates the Sonarr/Radarr webhooks |
+| `backup.py` | Encrypted backup zip (AES) and restore |
+| `updates.py` | Version check against GitHub per release channel, updates started from the web interface |
 | `i18n.py` | All texts in German and English; language per request (`use_language`), logs always English |
 | `poster.py` | Placeholder poster for titles without an image |
 

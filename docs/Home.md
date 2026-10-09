@@ -15,7 +15,8 @@ episode.
   and remembers things like *less: gore*.
 - **Download notifications** from Sonarr and Radarr: new episodes one by one, backfilled seasons as one
   message.
-- **Web interface** with connection status, event log and the complete configuration.
+- **Web interface** with a setup assistant, connection status, event log, the complete configuration and
+  encrypted backup and restore.
 - **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Speaks English and German and answers in the
   language you write in.
 
@@ -24,11 +25,11 @@ episode.
 | Page | Contents |
 | --- | --- |
 | [Installation](Installation.md) | Proxmox LXC (one command), Docker, manual, macOS/Windows |
-| [Setup](Setup.md) | Create the Telegram bot, get the keys, enter everything in the web interface |
+| [Setup](Setup.md) | The setup assistant, and where the bot token and keys come from |
 | [Configuration](Configuration.md) | All settings, where they come from, the web interface in detail |
 | [Webhooks](Webhooks.md) | Jellyfin (feedback), Sonarr and Radarr (download notifications) |
 | [Usage](Usage.md) | What to write to the bot, buttons, feedback rules |
-| [Operations](Operations.md) | Updates, logs, backups, moving |
+| [Operations](Operations.md) | Updates and release channels, logs, backup and restore, moving |
 | [Troubleshooting](Troubleshooting.md) | Common problems and how to fix them |
 | [Development](Development.md) | Code structure, tests, adding a language |
 
@@ -36,10 +37,11 @@ episode.
 
 - A machine that is always on: Proxmox LXC, Docker host, Raspberry Pi or similar (512 MB RAM is enough)
 - Jellyfin with a shared account
-- Jellyseerr (for new titles and requests)
+- Jellyseerr (for new titles and requests). Seerr, which Jellyseerr has been merged into, uses the same API,
+  as does Overseerr – both work the same way.
 - A Telegram bot (free via @BotFather)
 - A Claude API key with a few dollars of prepaid credit (→ [Setup](Setup.md#2-claude-api-key), and see the
-  costs below)
+  costs below). OpenAI, Gemini, Ollama and LM Studio can be selected instead, but are **untested**.
 - Optional: Sonarr and Radarr
 
 ## What does it cost?
