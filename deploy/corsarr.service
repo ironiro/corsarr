@@ -1,0 +1,18 @@
+[Unit]
+Description=Corsarr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=corsarr
+WorkingDirectory=/opt/corsarr
+Environment=DATA_DIR=/var/lib/corsarr PYTHONUNBUFFERED=1
+# Optional ("-"): everything else can be set in the web interface instead.
+EnvironmentFile=-/etc/corsarr.env
+ExecStart=/opt/corsarr/.venv/bin/python -m corsarr
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

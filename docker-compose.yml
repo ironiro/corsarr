@@ -1,0 +1,27 @@
+# Corsarr with Docker Compose
+#
+#   Start:   docker compose up -d
+#   Logs:    docker compose logs -f
+#   Update:  docker compose pull && docker compose up -d
+#
+# Then open http://<ip-of-this-host>:8787/ and set everything up in the web interface.
+services:
+  corsarr:
+    image: ghcr.io/ironiro/corsarr:latest
+    build: .                 # used if the image cannot be pulled, or with: docker compose up -d --build
+    container_name: corsarr
+    restart: unless-stopped
+    ports:
+      - "8787:8787"          # web interface + webhooks for Jellyfin, Sonarr, Radarr
+    volumes:
+      - corsarr-data:/data   # database, logs and settings from the web interface
+    environment:
+      TZ: Europe/Berlin      # time zone for logs and dates
+    # Optional: settings from a file instead of (or before) the web interface,
+    # template: .env.example
+    # env_file:
+    #   - path: .env
+    #     required: false
+
+volumes:
+  corsarr-data:

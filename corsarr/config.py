@@ -1,0 +1,201 @@
+"""Configuration: environment variables, optional .env, and values saved in the GUI.
+
+Precedence per field: DATA_DIR/config.json (GUI) > environment > .env file > default.
+DATA_DIR itself only comes from the environment or .env, since config.json lives inside it.
+"""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .i18n import LANGUAGES, set_language, t
+
+OVERRIDES_FILE = "config.json"
+
+
+@dataclass(frozen=True)
+class Field:
+    name: str
+    group: str
+    required: bool = False
+    secret: bool = False
+    default: str = ""
+    kind: str = "str"  # 'str' | 'int' | 'url' | 'choice'
+    choices: tuple[str, ...] = ()
+    app_restart: bool = False  # only takes effect after restarting the whole program
+    editable: bool = True
+
+
+FIELDS: tuple[Field, ...] = (
+    Field("TELEGRAM_BOT_TOKEN", "telegram", required=True, secret=True),
+    Field("TELEGRAM_CHAT_ID", "telegram", required=True, kind="int"),
+    # Optional separate chat for Sonarr/Radarr download messages; empty = the group above.
+    Field("NOTIFY_CHAT_ID", "telegram", kind="int"),
+    Field("ANTHROPIC_API_KEY", "claude", required=True, secret=True),
+    Field("CLAUDE_MODEL", "claude", default="claude-haiku-5-5"),
+    Field("JELLYFIN_URL", "jellyfin", required=True, kind="url"),
+    Field("JELLYFIN_API_KEY", "jellyfin", required=True, secret=True),
+    Field("JELLYFIN_USER", "jellyfin", required=True),
+    Field("JELLYSEERR_URL", "jellyseerr", required=True, kind="url"),
+    Field("JELLYSEERR_API_KEY", "jellyseerr", required=True, secret=True),
+    Field("WEBHOOK_HOST", "web", default="0.0.0.0", app_restart=True),
+    Field("WEBHOOK_PORT", "web", default="8787", kind="int", app_restart=True),
+    # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
+    Field("WEBHOOK_SECRET", "web", required=True),
+    Field("ADMIN_PASSWORD", "web", secret=True),
+    Field("LANGUAGE", "system", default="de", kind="choice", choices=LANGUAGES),
+    Field("LOG_LEVEL", "system", default="INFO", kind="choice",
+          choices=("DEBUG", "INFO", "WARNING", "ERROR")),
+    Field("DATA_DIR", "system", default="./data", editable=False, app_restart=True),
+)
+FIELD_BY_NAME = {f.name: f for f in FIELDS}
+
+
+@dataclass(frozen=True)
+class Config:
+    values: dict[str, str]
+    sources: dict[str, str]  # name -> 'gui' | 'env' | 'default'
+    data_dir: Path
+    errors: dict[str, str] = field(default_factory=dict)  # name -> message (missing or invalid)
+
+    def get(self, name: str) -> str:
+        return self.values.get(name, "")
+
+    @property
+    def complete(self) -> bool:
+        return not self.errors
+
+    # --- typed accessors for the bot ------------------------------------
+    telegram_token = property(lambda self: self.get("TELEGRAM_BOT_TOKEN"))
+    anthropic_api_key = property(lambda self: self.get("ANTHROPIC_API_KEY"))
+    model = property(lambda self: self.get("CLAUDE_MODEL"))
+    jellyfin_url = property(lambda self: self.get("JELLYFIN_URL").rstrip("/"))
+    jellyfin_api_key = property(lambda self: self.get("JELLYFIN_API_KEY"))
+    jellyfin_user = property(lambda self: self.get("JELLYFIN_USER"))
+    jellyseerr_url = property(lambda self: self.get("JELLYSEERR_URL").rstrip("/"))
+    jellyseerr_api_key = property(lambda self: self.get("JELLYSEERR_API_KEY"))
+    webhook_host = property(lambda self: self.get("WEBHOOK_HOST"))
+    webhook_secret = property(lambda self: self.get("WEBHOOK_SECRET"))
+    admin_password = property(lambda self: self.get("ADMIN_PASSWORD"))
+    language = property(lambda self: self.get("LANGUAGE"))
+    log_level = property(lambda self: self.get("LOG_LEVEL"))
+
+    @property
+    def chat_id(self) -> int:
+        return int(self.get("TELEGRAM_CHAT_ID") or 0)
+
+    @property
+    def notify_chat_id(self) -> int:
+        return int(self.get("NOTIFY_CHAT_ID") or 0) or self.chat_id
+
+    @property
+    def webhook_port(self) -> int:
+        return int(self.get("WEBHOOK_PORT") or 8787)
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "corsarr.db"
+
+    @property
+    def log_dir(self) -> Path:
+        return self.data_dir / "logs"
+
+    @property
+    def overrides_path(self) -> Path:
+        return self.data_dir / OVERRIDES_FILE
+
+
+def validate(f: Field, value: str) -> str | None:
+    """Error message for a value, or None when it is fine."""
+    if not value:
+        return t("cfg.missing", name=f.name) if f.required else None
+    if f.kind == "int":
+        try:
+            int(value)
+        except ValueError:
+            return t("cfg.not_int", name=f.name, value=value)
+    if f.kind == "url" and not value.startswith(("http://", "https://")):
+        return t("cfg.not_url", name=f.name)
+    if f.kind == "choice" and value not in f.choices:
+        return t("cfg.not_choice", name=f.name, choices=", ".join(f.choices))
+    return None
+
+
+def read_env_file() -> dict[str, str]:
+    env_file = Path(os.environ.get("CORSARR_ENV_FILE", ".env"))
+    result: dict[str, str] = {}
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                result[key.strip()] = val.strip().strip('"').strip("'")
+    return result
+
+
+def read_overrides(data_dir: Path) -> dict[str, str]:
+    path = data_dir / OVERRIDES_FILE
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {k: str(v) for k, v in data.items() if k in FIELD_BY_NAME and FIELD_BY_NAME[k].editable}
+
+
+def write_overrides(data_dir: Path, overrides: dict[str, str]) -> None:
+    path = data_dir / OVERRIDES_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(overrides, indent=2, ensure_ascii=False), encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(tmp, 0o600)  # holds API keys
+    os.replace(tmp, path)
+
+
+def env_value(name: str, env_file: dict[str, str] | None = None) -> str | None:
+    """Value from the environment, else from the .env file; None when unset or blank."""
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        value = (read_env_file() if env_file is None else env_file).get(name)
+    return value.strip() if value and value.strip() else None
+
+
+def _adopt_legacy_database(data_dir: Path) -> None:
+    """The project used to be called Filmbot: take over its database instead of starting empty."""
+    old, new = data_dir / "filmbot.db", data_dir / "corsarr.db"
+    if old.exists() and not new.exists():
+        for suffix in ("", "-wal", "-shm"):  # SQLite write-ahead files belong to the database
+            src = old.with_name(old.name + suffix)
+            if src.exists():
+                src.rename(new.with_name(new.name + suffix))
+
+
+def load() -> Config:
+    """Load leniently: missing or invalid values end up in Config.errors instead of exiting."""
+    env_file = read_env_file()
+
+    def from_env(name: str) -> str | None:
+        return env_value(name, env_file)
+
+    data_dir = Path(from_env("DATA_DIR") or "./data").resolve()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "logs").mkdir(exist_ok=True)
+    _adopt_legacy_database(data_dir)
+    overrides = read_overrides(data_dir)
+
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for f in FIELDS:
+        if f.name == "DATA_DIR":
+            values[f.name], sources[f.name] = str(data_dir), "env" if from_env("DATA_DIR") else "default"
+        elif overrides.get(f.name, "").strip():
+            values[f.name], sources[f.name] = overrides[f.name].strip(), "gui"
+        elif (env := from_env(f.name)) is not None:
+            values[f.name], sources[f.name] = env, "env"
+        else:
+            values[f.name], sources[f.name] = f.default, "default"
+
+    # Language first, so error messages already come out in it.
+    set_language(values["LANGUAGE"])
+    errors = {f.name: err for f in FIELDS if (err := validate(f, values[f.name]))}
+    return Config(values=values, sources=sources, data_dir=data_dir, errors=errors)
