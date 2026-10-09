@@ -279,7 +279,7 @@ summary { cursor: pointer; color: var(--muted); }
   header { position: static; }  /* the wrapped header would cover too much of a phone screen */
   .field { grid-template-columns: minmax(0, 1fr); }
   .field > label { padding-top: 0; }
-  nav { order: 3; flex-basis: 100%; overflow-x: auto; }
+  nav { order: 3; flex-basis: 100%; flex-wrap: wrap; min-width: 0; }
   nav button { padding: 12px 8px; white-space: nowrap; }
   .tools { margin-left: auto; }
   .card { padding: 16px; }
@@ -390,7 +390,7 @@ summary { cursor: pointer; color: var(--muted); }
   [data-skin="arr"] header { position: sticky; bottom: auto; width: auto; border-right: 0; border-bottom: 1px solid #191919; }
   [data-skin="arr"] .bar { flex-direction: row; flex-wrap: wrap; align-items: center; height: auto; }
   [data-skin="arr"] .brand { min-height: 52px; padding: 8px 16px; background: none; }
-  [data-skin="arr"] nav { order: 3; flex-direction: row; flex-basis: 100%; padding: 0 8px; overflow-x: auto; }
+  [data-skin="arr"] nav { order: 3; flex-direction: row; flex-basis: 100%; padding: 0 8px; flex-wrap: wrap; min-width: 0; }
   [data-skin="arr"] nav button { padding: 10px 10px; border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; }
   [data-skin="arr"] nav button[aria-selected="true"] { background: none; border-bottom-color: var(--accent); }
   [data-skin="arr"] .tools { margin: 0 0 0 auto; padding: 8px 16px; flex-direction: row; align-items: center; }
@@ -730,4 +730,29 @@ summary { cursor: pointer; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
   [data-skin="terminal"] .disclaimer::after, [data-skin="vhs"] .reels i { animation: none; }
+}
+
+/* --- setup assistant and backup (all skins: built from the shared variables) --------------------- */
+.wizsteps { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; padding: 0; margin: 0 0 16px;
+            font-size: 13px; color: var(--muted); counter-reset: step; }
+.wizsteps li { counter-increment: step; }
+.wizsteps li::before { content: counter(step) ". "; }
+.wizsteps li.on { color: var(--accent); font-weight: 700; }
+.wizsteps li.done::after { content: " ✓"; }
+.wizard h3 { margin: 22px 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.wizard .notice { margin: 12px 0; }
+.wiznav { margin-top: 20px; }
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.choices.big { flex-direction: row; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.choices code { color: var(--muted); }
+.copyrow { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 6px 0; }
+.copyrow code { overflow-wrap: anywhere; font-size: 13px; }
+.row.wrap { flex-wrap: wrap; }
+.row.wrap input { flex: 1 1 220px; min-width: 0; }
+.restore input[type="file"] { max-width: 100%; }
+[data-skin="arr"] nav button[data-tab="setup"]::before { content: "✚"; }
+[data-skin="arr"] nav button[data-tab="backup"]::before { content: "⤓"; }
+@media (max-width: 640px) {
+  .copyrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .copyrow > span:first-child { grid-column: 1 / -1; }
 }

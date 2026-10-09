@@ -25,7 +25,7 @@ function h(tag, attrs, ...children) {
     else if (v === true) el.setAttribute(k, "");
     else el.setAttribute(k, v);
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c === null || c === undefined || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -120,7 +120,8 @@ function showLogin(error) {
 // --- shell ---------------------------------------------------------------------------
 function showApp() {
   clearTimers();
-  const tabs = [["status", T.tab_status], ["events", T.tab_events], ["config", T.tab_config]];
+  const tabs = [["status", T.tab_status], ["events", T.tab_events], ["config", T.tab_config],
+                ["setup", T.tab_setup], ["backup", T.tab_backup]];
   const nav = h("nav", { role: "tablist" }, tabs.map(([id, label]) =>
     h("button", { role: "tab", "data-tab": id, "aria-selected": String(tab === id), onclick: () => { tab = id; showApp(); } }, label)));
   const header = h("header", {}, h("div", { class: "bar" },
@@ -132,7 +133,7 @@ function showApp() {
     h("span", { class: "spacer" }), h("div", { id: "pageactions", class: "row" }));
   const main = h("main", { id: "main" });
   document.getElementById("app").replaceChildren(header, pagebar, main);
-  ({ status: viewStatus, events: viewEvents, config: viewConfig })[tab](main);
+  ({ status: viewStatus, events: viewEvents, config: viewConfig, setup: viewSetup, backup: viewBackup })[tab](main);
   refreshStatus();
   timers.push(setInterval(refreshStatus, 10000));
 }
@@ -662,12 +663,351 @@ async function saveConfig(btn) {
   }
 }
 
+// --- setup assistant -------------------------------------------------------------------------
+// Step by step through the required settings. Every step is tested with the values typed in and only
+// then saved, so leaving halfway keeps what already works. Also offers restoring a backup instead.
+const WIZ_STEPS = ["start", "telegram", "llm", "jellyfin", "jellyseerr", "webhooks", "done"];
+const wiz = { step: 0, values: {}, result: {}, error: "", busy: false, chats: null, models: null, users: null,
+              hooks: null, arr: {} };
+let wizTimer = null;
+
+async function viewSetup(main) {
+  main.append(h("div", { id: "setup" }));
+  try {
+    configData = await api("/api/config");
+  } catch (e) {
+    if (e.message !== "unauthorized") renderNetworkError();
+    return;
+  }
+  renderSetup();
+}
+
+const field = name => configData.fields.find(f => f.name === name) || {};
+// Value typed in this session, else the saved one (secrets are never sent to the browser: empty = keep).
+const wizValue = name => name in wiz.values ? wiz.values[name] : (field(name).secret ? "" : field(name).value || "");
+
+function wizInput(name, { placeholder, onchange } = {}) {
+  const f = field(name);
+  return h("div", { class: "field" },
+    h("label", { for: "w_" + name }, T["f_" + name] || name, h("span", { class: "name" }, name)),
+    h("input", {
+      id: "w_" + name, type: f.secret ? "password" : "text", value: wizValue(name), spellcheck: "false",
+      autocomplete: f.secret ? "new-password" : "off",
+      placeholder: f.secret ? (f.is_set ? T.secret_set : T.secret_unset) : (placeholder || f.default || ""),
+      oninput: e => { wiz.values[name] = e.target.value.trim(); wiz.result[WIZ_STEPS[wiz.step]] = null; },
+      onchange,
+    }));
+}
+
+function wizSelect(name, options, onchange) {
+  const current = wizValue(name);
+  const opts = options.map(([value, label]) => h("option", { value, selected: value === current }, label));
+  if (!options.some(([value]) => value === current)) opts.unshift(h("option", { value: current, selected: true }, current || "–"));
+  return h("div", { class: "field" },
+    h("label", { for: "w_" + name }, T["f_" + name] || name, h("span", { class: "name" }, name)),
+    h("select", { id: "w_" + name, onchange: e => {
+      wiz.values[name] = e.target.value; wiz.result[WIZ_STEPS[wiz.step]] = null; (onchange || renderSetup)();
+    } }, opts));
+}
+
+// Copy also works over plain http on the home network, where navigator.clipboard is not available.
+function copyButton(text) {
+  return h("button", { class: "btn small", onclick: e => {
+    const done = () => { e.target.textContent = T.wiz_copied; setTimeout(() => { e.target.textContent = T.wiz_copy; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done); return; }
+    const area = h("textarea", { style: "position:fixed;opacity:0" }, text);
+    document.body.append(area); area.select();
+    try { document.execCommand("copy"); done(); } finally { area.remove(); }
+  } }, T.wiz_copy);
+}
+
+const copyRow = (label, text) => h("div", { class: "copyrow" }, h("span", { class: "muted" }, label),
+  h("code", {}, text), copyButton(text));
+
+async function wizCall(path, body) {
+  wiz.busy = true; wiz.error = ""; renderSetup();
+  try {
+    return await api(path, { method: "POST", body });
+  } catch (e) {
+    wiz.error = e.message;
+    return null;
+  } finally {
+    wiz.busy = false; renderSetup();
+  }
+}
+
+// Save the values of the current step (the bot restarts with them) and go on.
+async function wizSave(names) {
+  const values = Object.fromEntries(names.filter(n => n in wiz.values && wiz.values[n] !== "").map(n => [n, wiz.values[n]]));
+  if (Object.keys(values).length) {
+    wiz.busy = true; renderSetup();
+    try {
+      configData = await api("/api/config", { method: "PUT", body: { values, reset: [] } });
+      names.forEach(n => delete wiz.values[n]);
+    } catch (e) {
+      wiz.busy = false;
+      wiz.error = T.save_failed + ": " + Object.values(e.data?.errors || {}).join(", ");
+      renderSetup();
+      return;
+    }
+    wiz.busy = false;
+  }
+  wizGo(wiz.step + 1);
+}
+
+function wizGo(step) {
+  wiz.step = step; wiz.error = "";
+  clearInterval(wizTimer); wizTimer = null;
+  if (WIZ_STEPS[step] === "webhooks") {
+    loadHooks();
+    wizTimer = setInterval(loadHooks, 5000);  // turns green as soon as the first event arrives
+    timers.push(wizTimer);
+  }
+  if (WIZ_STEPS[step] === "llm" && !wiz.models) loadWizModels();
+  renderSetup();
+}
+
+async function loadHooks() {
+  try { wiz.hooks = await api("/api/setup/webhooks"); } catch (e) { return; }
+  if (WIZ_STEPS[wiz.step] === "webhooks") renderSetup();
+}
+
+const provider = () => wizValue("LLM_PROVIDER") || "claude";
+const providerFields = () => providerInfo(provider()).fields || {};
+
+async function loadWizModels() {
+  const pf = providerFields();
+  const res = await api("/api/options/models", { method: "POST", body: {
+    provider: provider(), api_key: (pf.key && wiz.values[pf.key]) || "", url: (pf.url && wiz.values[pf.url]) || "" } })
+    .catch(e => ({ models: [], error: e.message }));
+  wiz.models = res.models && res.models.length ? res.models : null;
+  renderSetup();
+}
+
+async function loadWizUsers() {
+  const res = await api("/api/options/jellyfin-users", { method: "POST", body: {
+    url: wiz.values.JELLYFIN_URL || "", api_key: wiz.values.JELLYFIN_API_KEY || "" } })
+    .catch(e => ({ users: [], error: e.message }));
+  wiz.users = res.users && res.users.length ? res.users : null;
+  if (res.error) wiz.error = tr("options_fallback", { error: res.error });
+  renderSetup();
+}
+
+async function wizTest(service, names) {
+  const res = await wizCall("/api/setup/test", { service, values: Object.fromEntries(names.map(n => [n, wiz.values[n] || ""])) });
+  if (res) wiz.result[service] = res.detail;
+  renderSetup();
+}
+
+function stepTelegram() {
+  const found = async () => {
+    const res = await wizCall("/api/setup/telegram", { token: wiz.values.TELEGRAM_BOT_TOKEN || "" });
+    if (!res) return;
+    wiz.result.telegram = res;
+    if (res.chats.length === 1 && !wiz.values.TELEGRAM_CHAT_ID) wiz.values.TELEGRAM_CHAT_ID = String(res.chats[0].id);
+    renderSetup();
+  };
+  const r = wiz.result.telegram;
+  const chatId = wizValue("TELEGRAM_CHAT_ID");
+  const body = [h("p", {}, T.wiz_tg_intro), wizInput("TELEGRAM_BOT_TOKEN"),
+    h("button", { class: "btn", onclick: found, disabled: wiz.busy }, r ? T.wiz_tg_again : T.wiz_tg_find)];
+  if (r) {
+    body.push(h("div", { class: "notice ok" }, tr("wiz_tg_bot", { name: r.username })));
+    if (r.privacy) body.push(h("div", { class: "notice warn" }, T.wiz_privacy));
+    if (!r.chats.length) body.push(h("div", { class: "notice" }, tr("wiz_tg_no_chats", { name: r.username })));
+    else body.push(h("div", { class: "field" }, h("label", {}, T.wiz_tg_pick),
+      h("div", { class: "choices" }, r.chats.map(c => h("label", { class: "switch" },
+        h("input", { type: "radio", name: "chat", checked: String(c.id) === chatId,
+                     onchange: () => { wiz.values.TELEGRAM_CHAT_ID = String(c.id); renderSetup(); } }),
+        c.title || T.wiz_tg_current, h("code", {}, " " + c.id))))));
+  }
+  return { body, ready: !!r && !!chatId, save: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"] };
+}
+
+function stepLlm() {
+  const pf = providerFields();
+  const reload = () => { wiz.models = null; loadWizModels(); };
+  const body = [h("p", {}, T.wiz_llm_intro),
+    wizSelect("LLM_PROVIDER", (configData.providers || []).map(p =>
+      [p.id, tr(p.recommended ? "provider_recommended" : "provider_untested", { name: p.name })]), () => { wiz.values[pf.model] = undefined; reload(); }),
+    providerNotice(provider())];
+  if (pf.key) body.push(wizInput(pf.key, { onchange: reload }));
+  if (pf.url) body.push(wizInput(pf.url, { onchange: reload }));
+  const fresh = providerFields();
+  body.push(wiz.models
+    ? wizSelect(fresh.model, wiz.models.map(m => [m.id, m.cost && m.recommended ? tr("model_option_recommended",
+        { name: m.name, cost: fmtUsd(m.cost.per_suggestion) }) : m.name]))
+    : wizInput(fresh.model));
+  if (provider() === "claude") body.push(h("p", { class: "hint" }, T.wiz_llm_cost));
+  const names = ["LLM_PROVIDER", fresh.key, fresh.url, fresh.model].filter(Boolean);
+  body.push(h("button", { class: "btn", disabled: wiz.busy, onclick: () => wizTest("llm", names) }, T.wiz_test));
+  return { body, ready: !!wiz.result.llm, ok: wiz.result.llm, save: names };
+}
+
+function stepJellyfin() {
+  const names = ["JELLYFIN_URL", "JELLYFIN_API_KEY", "JELLYFIN_USER"];
+  const body = [h("p", {}, T.wiz_jf_intro), wizInput("JELLYFIN_URL"), wizInput("JELLYFIN_API_KEY", { onchange: loadWizUsers }),
+    wiz.users ? wizSelect("JELLYFIN_USER", wiz.users.map(u => [u, u])) : wizInput("JELLYFIN_USER"),
+    h("div", { class: "row" },
+      h("button", { class: "btn", disabled: wiz.busy, onclick: loadWizUsers }, T.wiz_load_users),
+      h("button", { class: "btn", disabled: wiz.busy, onclick: () => wizTest("jellyfin", names) }, T.wiz_test))];
+  return { body, ready: !!wiz.result.jellyfin, ok: wiz.result.jellyfin, save: names };
+}
+
+function stepSeerr() {
+  const names = ["JELLYSEERR_URL", "JELLYSEERR_API_KEY"];
+  const body = [h("p", {}, T.wiz_seerr_intro), wizInput("JELLYSEERR_URL"), wizInput("JELLYSEERR_API_KEY"),
+    h("button", { class: "btn", disabled: wiz.busy, onclick: () => wizTest("jellyseerr", names) }, T.wiz_test)];
+  return { body, ready: !!wiz.result.jellyseerr, ok: wiz.result.jellyseerr, save: names };
+}
+
+function hookState(service) {
+  const st = wiz.hooks?.services?.[service];
+  return st && st.status === "ok" ? h("span", { class: "pill ok" }, T.wiz_received)
+    : h("span", { class: "pill" }, T.wiz_waiting);
+}
+
+function stepWebhooks() {
+  const w = wiz.hooks;
+  if (!w) return { body: [h("p", {}, T.loading)], ready: true, save: [] };
+  const body = [h("p", {}, T.wiz_hooks_intro)];
+  if (/\/\/(localhost|127\.|\[::1\])/.test(w.jellyfin)) body.push(h("div", { class: "notice warn" }, T.wiz_hooks_local));
+  body.push(h("h3", {}, "Jellyfin ", hookState("webhook")),
+    h("p", { class: "hint" }, T.wiz_jf_hook_steps),
+    copyRow("Webhook Url", w.jellyfin), copyRow(T.wiz_header, w.header), copyRow(T.wiz_header_value, w.secret),
+    h("details", {}, h("summary", {}, T.wiz_template), h("pre", { class: "log-tail" }, w.template), copyButton(w.template)));
+  for (const kind of ["sonarr", "radarr"]) {
+    const name = kind[0].toUpperCase() + kind.slice(1);
+    const a = wiz.arr[kind] || (wiz.arr[kind] = { url: "", key: "" });
+    const connect = async () => {
+      if (!confirm(tr("wiz_arr_confirm", { name }))) return;
+      const res = await wizCall("/api/setup/arr", { kind, url: a.url, api_key: a.key, base: w.jellyfin.replace(/\/jellyfin$/, "") });
+      if (res) { a.done = res; renderSetup(); }
+    };
+    body.push(h("h3", {}, name, " ", hookState(kind)),
+      h("p", { class: "hint" }, tr("wiz_arr_intro", { name })),
+      h("div", { class: "row wrap" },
+        h("input", { placeholder: tr("wiz_arr_url", { name }), value: a.url, oninput: e => { a.url = e.target.value.trim(); } }),
+        h("input", { type: "password", placeholder: T.wiz_arr_key, value: a.key, autocomplete: "new-password",
+                     oninput: e => { a.key = e.target.value.trim(); } }),
+        h("button", { class: "btn", disabled: wiz.busy, onclick: connect }, tr("wiz_arr_connect", { name }))),
+      a.done ? h("div", { class: "notice ok" }, tr("wiz_arr_done", { name })) : null,
+      a.done?.telegram?.length ? h("div", { class: "notice warn" }, tr("wiz_arr_telegram", { name, names: a.done.telegram.join(", ") })) : null,
+      h("details", {}, h("summary", {}, T.wiz_manual), copyRow("URL", w[kind])));
+  }
+  return { body, ready: true, save: [], optional: true };
+}
+
+function restoreForm(onDone) {
+  const file = h("input", { type: "file", accept: ".zip,application/zip" });
+  const pw = h("input", { type: "password", placeholder: T.restore_pw, autocomplete: "off" });
+  const msg = h("div", {});
+  const btn = h("button", { class: "btn primary", onclick: async () => {
+    if (!file.files.length || !pw.value) { msg.replaceChildren(h("div", { class: "notice error" }, T.restore_missing)); return; }
+    if (!confirm(T.restore_confirm)) return;
+    btn.disabled = true; btn.textContent = T.restore_running;
+    const form = new FormData();
+    form.append("file", file.files[0]);
+    form.append("password", pw.value);
+    try {
+      const res = await fetch("/api/restore", { method: "POST", headers: { "X-Corsarr": "1" }, body: form });
+      if (res.status === 401) { showLogin(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      msg.replaceChildren(h("div", { class: "notice ok" }, tr("restore_done", { version: data.version || "?", created: (data.created || "").slice(0, 16).replace("T", " ") })));
+      setTimeout(onDone, 2000);
+    } catch (e) {
+      msg.replaceChildren(h("div", { class: "notice error" }, e.message));
+    } finally {
+      btn.disabled = false; btn.textContent = T.restore_button;
+    }
+  } }, T.restore_button);
+  return h("div", { class: "restore" }, h("div", { class: "field" }, h("label", {}, T.restore_file), file),
+    h("div", { class: "field" }, h("label", {}, T.restore_pw), pw), btn, msg);
+}
+
+async function afterRestore() {
+  await loadTexts();
+  tab = "status";
+  showApp();
+}
+
+function renderSetup() {
+  const box = document.getElementById("setup");
+  if (!box || !configData) return;
+  const name = WIZ_STEPS[wiz.step];
+  let content;
+  if (name === "start") {
+    content = { body: [h("p", {}, T.wiz_intro),
+      h("div", { class: "choices big" },
+        h("button", { class: "btn primary", onclick: () => wizGo(1) }, T.wiz_new),
+        h("button", { class: "btn", onclick: () => { wiz.restoring = !wiz.restoring; renderSetup(); } }, T.wiz_restore)),
+      wiz.restoring ? [h("p", { class: "hint" }, T.wiz_restore_hint), restoreForm(afterRestore)] : null], start: true };
+  } else if (name === "done") {
+    content = { body: [h("p", {}, T.wiz_done_text),
+      h("button", { class: "btn primary", onclick: () => { tab = "status"; wiz.step = 0; showApp(); } }, T.wiz_to_status)], last: true };
+  } else {
+    content = { telegram: stepTelegram, llm: stepLlm, jellyfin: stepJellyfin, jellyseerr: stepSeerr, webhooks: stepWebhooks }[name]();
+  }
+  const total = WIZ_STEPS.length - 2;
+  const head = h("div", { class: "row" }, h("h2", {}, T["wiz_" + name + "_title"]), h("span", { class: "spacer" }),
+    !content.start && !content.last ? h("span", { class: "muted" }, tr("wiz_step", { n: wiz.step, total })) : null);
+  const steps = h("ol", { class: "wizsteps" }, WIZ_STEPS.slice(1, -1).map((s, i) =>
+    h("li", { class: i + 1 === wiz.step ? "on" : i + 1 < wiz.step ? "done" : "" }, T["wiz_" + s + "_short"])));
+  const nav = content.start || content.last ? null : h("div", { class: "savebar wiznav" },
+    h("button", { class: "btn", onclick: () => wizGo(wiz.step - 1), disabled: wiz.busy }, T.wiz_back),
+    h("span", { class: "spacer" }),
+    content.optional ? null : h("button", { class: "link", onclick: () => wizGo(wiz.step + 1) }, T.wiz_skip),
+    h("button", { class: "btn primary", disabled: wiz.busy || !content.ready, onclick: () => wizSave(content.save) },
+      wiz.busy ? T.wiz_testing : T.wiz_next));
+  box.replaceChildren(h("div", { class: "card wizard" }, steps, head, content.body,
+    content.ok ? h("div", { class: "notice ok" }, "✓ ", content.ok) : null,
+    wiz.error ? h("div", { class: "notice error" }, wiz.error) : null, nav));
+}
+
+// --- backup tab ------------------------------------------------------------------------------
+function viewBackup(main) {
+  const pw = h("input", { type: "password", autocomplete: "new-password", placeholder: T.backup_pw });
+  const pw2 = h("input", { type: "password", autocomplete: "new-password", placeholder: T.backup_pw2 });
+  const msg = h("div", {});
+  const download = h("button", { class: "btn primary", onclick: async () => {
+    if (pw.value !== pw2.value) { msg.replaceChildren(h("div", { class: "notice error" }, T.backup_pw_mismatch)); return; }
+    download.disabled = true; download.textContent = T.backup_downloading;
+    try {
+      const res = await fetch("/api/backup", { method: "POST", body: JSON.stringify({ password: pw.value }),
+        headers: { "X-Corsarr": "1", "Content-Type": "application/json" } });
+      if (res.status === 401) { showLogin(); return; }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || "corsarr-backup.zip";
+      const url = URL.createObjectURL(await res.blob());
+      const a = h("a", { href: url, download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      msg.replaceChildren(h("div", { class: "notice ok" }, T.backup_done));
+      pw.value = pw2.value = "";
+    } catch (e) {
+      msg.replaceChildren(h("div", { class: "notice error" }, e.message));
+    } finally {
+      download.disabled = false; download.textContent = T.backup_download;
+    }
+  } }, T.backup_download);
+  const canBackup = status?.auth;
+  main.append(
+    h("div", { class: "card" }, h("h2", {}, T.backup_title), h("p", {}, T.backup_intro),
+      canBackup ? [h("div", { class: "field" }, h("label", {}, T.backup_pw), pw),
+                   h("div", { class: "field" }, h("label", {}, T.backup_pw2), pw2), download, msg]
+        : h("div", { class: "notice warn" }, T.backup_needs_pw, " ",
+            h("button", { class: "link", onclick: () => { tab = "config"; showApp(); } }, "→ " + T.tab_config))),
+    h("div", { class: "card" }, h("h2", {}, T.restore_title), h("p", {}, T.restore_intro), restoreForm(afterRestore)));
+}
+
 // --- start ---------------------------------------------------------------------------------
 (async () => {
   if (!SKINS.includes(currentSkin())) document.documentElement.dataset.skin = SKINS[0];
   await loadTexts();
   try {
-    await api("/api/status");
+    const first = await api("/api/status");
+    if (first.state === "unconfigured") tab = "setup";  // new installation: start with the assistant
     showApp();
   } catch (e) {
     if (e.message !== "unauthorized") showLogin(T.network_error);
