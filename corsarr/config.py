@@ -74,17 +74,17 @@ FIELDS: tuple[Field, ...] = (
     Field("JELLYFIN_USER", "jellyfin", required=True),
     Field("JELLYSEERR_URL", "jellyseerr", required=True, kind="url"),
     Field("JELLYSEERR_API_KEY", "jellyseerr", required=True, secret=True),
-    Field("WEBHOOK_HOST", "web", default="0.0.0.0", app_restart=True),
-    Field("WEBHOOK_PORT", "web", default="8787", kind="int", app_restart=True),
+    Field("WEBHOOK_HOST", "advanced", default="0.0.0.0", app_restart=True),
+    Field("WEBHOOK_PORT", "advanced", default="8787", kind="int", app_restart=True),
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
-    Field("WEBHOOK_SECRET", "web", required=True),
-    Field("ADMIN_PASSWORD", "web", secret=True),
+    Field("WEBHOOK_SECRET", "webhooks", required=True),
+    Field("ADMIN_PASSWORD", "interface", secret=True),
     # Docker images follow the channel of their tag (CORSARR_CHANNEL), so there it is fixed.
-    Field("UPDATE_CHANNEL", "system", default="stable", kind="choice", choices=("stable", "beta", "dev"), live=True),
-    Field("LANGUAGE", "system", default="en", kind="choice", choices=LANGUAGES),
-    Field("LOG_LEVEL", "system", default="INFO", kind="choice",
+    Field("UPDATE_CHANNEL", "interface", default="stable", kind="choice", choices=("stable", "beta", "dev"), live=True),
+    Field("LANGUAGE", "interface", default="en", kind="choice", choices=LANGUAGES),
+    Field("LOG_LEVEL", "advanced", default="INFO", kind="choice",
           choices=("DEBUG", "INFO", "WARNING", "ERROR")),
-    Field("DATA_DIR", "system", default="./data", editable=False, app_restart=True),
+    Field("DATA_DIR", "advanced", default="./data", editable=False, app_restart=True),
 )
 FIELD_BY_NAME = {f.name: f for f in FIELDS}
 
