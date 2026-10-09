@@ -8,6 +8,7 @@ let status = null;
 let configData = null;
 let updateInfo = null;      // /api/update: installed vs. latest version
 let updateTimer = null;
+let loadedVersion = null;   // version this page was loaded with – reload once the server runs another
 const dirty = {};           // field name -> new value
 const resets = new Set();   // fields whose GUI value should be dropped
 let events = [];
@@ -133,6 +134,9 @@ async function refreshStatus() {
     return;
   }
   document.getElementById("neterr")?.remove();
+  // After an update (button, command line or automatic) load the new interface instead of the old one.
+  if (loadedVersion === null) loadedVersion = status.version || "";
+  else if (status.version && status.version !== loadedVersion) { location.reload(); return; }
   const logoutBtn = document.getElementById("logout");
   if (logoutBtn) logoutBtn.hidden = !status.auth;  // no login configured = nothing to sign out of
   const [cls, label] = stateInfo(status);
@@ -283,7 +287,7 @@ function watchUpdate() {
     if (!u.updating) {
       clearInterval(updateTimer);
       updateTimer = null;
-      refreshStatus();
+      location.reload();  // the update may have changed the interface itself
     }
   }, 4000);
 }
@@ -476,6 +480,9 @@ function fieldRow(f) {
   let input;
   const onInput = e => {
     dirty[f.name] = e.target.value; resets.delete(f.name);
+    // The red error is from the saved state; it is checked again on save, so drop it while editing.
+    e.target.classList.remove("invalid");
+    e.target.closest(".field")?.querySelector(".err")?.remove();
     updateSaveBar();
   };
   // The pickers depend on these – reload them once a new address or key has been typed.
@@ -494,7 +501,7 @@ function fieldRow(f) {
       placeholder: f.secret ? (f.is_set ? T.secret_set : T.secret_unset) : (f.default || ""),
       autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", oninput: onInput,
       onchange: reloads ? () => loadOptions(reloads) : null,
-      class: f.error ? "invalid" : null,
+      class: f.error && !(f.name in dirty) ? "invalid" : null,
     });
   }
   const info = [];
@@ -513,7 +520,7 @@ function fieldRow(f) {
     h("div", {}, input,
       f.name === "CLAUDE_MODEL" ? modelWarning(current || f.default) : null,
       info.length ? h("div", { class: "info" }, info.map(i => typeof i === "string" ? h("span", {}, i) : i)) : null,
-      f.error ? h("div", { class: "err" }, f.error) : null));
+      f.error && !(f.name in dirty) ? h("div", { class: "err" }, f.error) : null));
 }
 
 async function saveSetting(key, value) {
