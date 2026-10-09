@@ -7,8 +7,8 @@ How an update runs depends on how Corsarr was installed:
 - docker: a container can't replace its own image – the web interface shows the command instead.
 - manual: started by hand from a git checkout – the web interface shows `git pull`.
 
-Release channels: stable = the newest GitHub release that is not a pre-release (tags like v1.2.0),
-beta = the newest release including pre-releases (v1.3.0-beta.1), dev = the head of the main branch.
+Release channels: stable = the newest release tag (v1.2.0), beta = the newest tag including
+pre-releases (v1.3.0-beta.1), dev = the head of the main branch.
 """
 from __future__ import annotations
 
@@ -184,26 +184,40 @@ async def _check_branch(client: httpx.AsyncClient, current: str | None) -> dict:
 
 
 async def _check_releases(client: httpx.AsyncClient, current: str | None, channel: str) -> dict:
-    """stable/beta channel: the newest matching GitHub release, plus the ones in between."""
-    r = await client.get(f"https://api.github.com/repos/{UPSTREAM}/releases", params={"per_page": 30})
+    """stable/beta channel: the newest matching release tag, plus the ones in between.
+
+    Tags are the source of truth (a plain `git push` of vX.Y.Z publishes a release; "-beta.N" marks a
+    pre-release). Release notes come from GitHub releases when one exists for the tag.
+    """
+    r = await client.get(f"https://api.github.com/repos/{UPSTREAM}/tags", params={"per_page": 100})
     r.raise_for_status()
-    releases = [
-        {"tag": rel["tag_name"], "name": rel.get("name") or rel["tag_name"], "prerelease": rel["prerelease"],
-         "date": rel.get("published_at") or "", "notes": (rel.get("body") or "")[:2000], "url": rel.get("html_url", "")}
-        for rel in r.json()
-        if not rel.get("draft") and version_key(rel.get("tag_name"))
-        and (channel == "beta" or not rel["prerelease"])
-    ]
-    releases.sort(key=lambda rel: version_key(rel["tag"]), reverse=True)
-    if not releases:
+    tags = [t["name"] for t in r.json() if version_key(t.get("name"))
+            and (channel == "beta" or "-" not in t["name"])]
+    tags.sort(key=version_key, reverse=True)
+    if not tags:
         return {"latest": None, "target": None, "behind": 0}
-    latest = releases[0]["tag"]
+    latest = tags[0]
     have = version_key(current)
     if have is None:  # running a dev commit: offer the channel's newest release
-        newer = releases[:1] if current != latest else []
+        newer = tags[:1] if current != latest else []
     else:
-        newer = [rel for rel in releases if version_key(rel["tag"]) > have]
+        newer = [tag for tag in tags if version_key(tag) > have]
+    notes = await _release_notes(client)
+    releases = [{"tag": tag, "prerelease": "-" in tag, **notes.get(tag, {"name": tag, "date": "", "notes": ""})}
+                for tag in newer[:10]]
     return {"latest": latest, "target": latest if latest != current else None, "behind": len(newer),
-            "releases": newer[:10],
+            "releases": releases,
             # e.g. switched from beta back to stable: the newest stable is older than what runs now
             "downgrade": have is not None and version_key(latest) < have}
+
+
+async def _release_notes(client: httpx.AsyncClient) -> dict[str, dict]:
+    """Name, date and notes of the GitHub releases by tag; empty when there are none or GitHub fails."""
+    try:
+        r = await client.get(f"https://api.github.com/repos/{UPSTREAM}/releases", params={"per_page": 30})
+        r.raise_for_status()
+        return {rel["tag_name"]: {"name": rel.get("name") or rel["tag_name"], "date": rel.get("published_at") or "",
+                                  "notes": (rel.get("body") or "")[:2000]}
+                for rel in r.json() if not rel.get("draft")}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return {}

@@ -80,15 +80,17 @@ convert older files in `_migrate_overrides()`. New fields need nothing – a mis
 
 ## Publishing a release
 
-`main` is the development branch. Releases are git tags; the CI builds the Docker images for them.
+`main` is the development branch. A release is a git tag; the CI builds the Docker images for it.
 
 ```bash
-gh release create v1.2.0 --generate-notes              # stable → :latest, :stable, :beta, :1.2.0, :1.2
-gh release create v1.3.0-beta.1 --prerelease --generate-notes   # beta → :beta, :1.3.0-beta.1
+git tag v1.2.0 && git push origin v1.2.0                 # stable → :latest, :stable, :beta, :1.2.0, :1.2
+git tag v1.3.0-beta.1 && git push origin v1.3.0-beta.1   # beta → :beta, :1.3.0-beta.1
 ```
 
-Tags must look exactly like `vX.Y.Z` or `vX.Y.Z-beta.N` – other tags are ignored by the update check. The
-release notes are what users see in the web interface before updating. Every push to `main` builds `:edge`.
+Tags must look exactly like `vX.Y.Z` or `vX.Y.Z-beta.N` – other tags are ignored by the update check. If you
+also create a GitHub release for the tag (on GitHub under *Releases → Draft a new release*, or
+`gh release create v1.2.0 --generate-notes`), its notes are shown in the web interface before updating.
+Every push to `main` builds `:edge`.
 
 ## Line endings
 

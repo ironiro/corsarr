@@ -86,14 +86,9 @@ def test_install_kind(monkeypatch):
     assert updates.install_kind() == "docker"
 
 
-RELEASES = [
-    {"tag_name": "v1.3.0-beta.2", "name": "1.3.0 beta 2", "prerelease": True, "draft": False, "body": "new skins"},
-    {"tag_name": "v1.2.1", "name": "1.2.1", "prerelease": False, "draft": False, "body": "fix"},
-    {"tag_name": "v1.3.0-beta.1", "name": "1.3.0 beta 1", "prerelease": True, "draft": False, "body": ""},
-    {"tag_name": "v1.2.0", "name": "1.2.0", "prerelease": False, "draft": False, "body": ""},
-    {"tag_name": "v2.0.0", "name": "draft", "prerelease": False, "draft": True, "body": ""},
-    {"tag_name": "nightly", "name": "x", "prerelease": True, "draft": False, "body": ""},
-]
+TAGS = ["v1.3.0-beta.2", "v1.2.1", "v1.3.0-beta.1", "v1.2.0", "nightly", "v1.2"]
+RELEASES = [{"tag_name": "v1.2.1", "name": "1.2.1 – fixes", "draft": False, "body": "fix",
+             "published_at": "2026-10-09T10:00:00Z"}]
 
 
 def check_releases(monkeypatch, current, channel):
@@ -101,16 +96,20 @@ def check_releases(monkeypatch, current, channel):
     monkeypatch.setattr(updates, "current_version", lambda: current)
 
     async def go():
-        transport = httpx.MockTransport(lambda r: httpx.Response(200, json=RELEASES))
+        def handler(request):
+            if request.url.path.endswith("/tags"):
+                return httpx.Response(200, json=[{"name": t} for t in TAGS])
+            return httpx.Response(200, json=RELEASES)
+        transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
             return await updates.check(channel, client=client)
     return asyncio.run(go())
 
 
-def test_stable_channel_ignores_betas_drafts_and_odd_tags(monkeypatch):
+def test_stable_channel_ignores_betas_and_odd_tags(monkeypatch):
     info = check_releases(monkeypatch, "v1.2.0", "stable")
     assert info["latest"] == info["target"] == "v1.2.1" and info["behind"] == 1 and not info["downgrade"]
-    assert [r["tag"] for r in info["releases"]] == ["v1.2.1"]
+    assert [(r["tag"], r["name"], r["notes"]) for r in info["releases"]] == [("v1.2.1", "1.2.1 – fixes", "fix")]
     assert check_releases(monkeypatch, "v1.2.1", "stable")["target"] is None  # up to date
 
 
