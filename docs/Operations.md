@@ -36,6 +36,17 @@ To restart only the Telegram part (e.g. after a network problem): web interface 
 
 ## Update
 
+**From the web interface:** under **Status → Version** Corsarr shows the installed version, the newest one on
+GitHub and the list of changes in between. With the LXC/Proxmox installation, **Update now** installs it:
+the app drops a request file, a small root service (`corsarr-update.path`) runs the installer, and Corsarr
+restarts. The page reconnects by itself and shows the installer's output. With Docker or a manual install,
+the page shows the command to run instead.
+
+Installations made before this feature existed get the update service with the next command-line update
+below; after that the button works.
+
+On the command line:
+
 - **LXC:** in the Proxmox host shell `pct exec <id> -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"` (see [Installation](Installation.md#update)).
 - **Docker:** `docker compose pull && docker compose up -d`
 - **Manual:** `cd /opt/corsarr && git pull && .venv/bin/pip install -r requirements.txt && systemctl restart corsarr`

@@ -125,6 +125,14 @@ input.invalid { border-color: var(--err); }
 .notice { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-top: 12px; }
 .notice.warn { background: var(--warn-bg); color: var(--text); border: 1px solid var(--warn); }
 .notice.error { background: var(--err-bg); color: var(--text); border: 1px solid var(--err); }
+.changes { margin: 12px 0 10px; padding-left: 18px; font-size: 13.5px; }
+.changes li { margin: 3px 0; }
+.changes code, .hint code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.muted { color: var(--muted); }
+details { margin-top: 10px; font-size: 13px; }
+summary { cursor: pointer; color: var(--muted); }
+.log-tail { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border-radius: 8px; padding: 10px;
+            max-height: 260px; overflow: auto; white-space: pre-wrap; }
 .notice.ok { background: var(--ok-bg); color: var(--text); border: 1px solid var(--ok); }
 
 /* --- events ------------------------------------------------------------------------ */

@@ -16,7 +16,7 @@ episode.
 - **Download notifications** from Sonarr and Radarr: new episodes one by one, backfilled seasons as one
   message.
 - **Web interface** with connection status, event log and the complete configuration.
-- **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Replies in English or German – whichever
+- **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Speaks English and German and answers in the
   language you write in.
 
 ## Pages
@@ -38,6 +38,25 @@ episode.
 - Jellyfin with a shared account
 - Jellyseerr (for new titles and requests)
 - A Telegram bot (free via @BotFather)
-- A Claude API key – set a monthly spend limit in the Claude Console (e.g. $2); your actual costs are shown
-  in the Console under *Usage*
+- A Claude API key with a few dollars of prepaid credit (→ [Setup](Setup.md#2-claude-api-key), and see the
+  costs below)
 - Optional: Sonarr and Radarr
+
+## What does it cost?
+
+Corsarr itself is free. You only pay Anthropic for the Claude API, and with Claude Haiku that is very little.
+Measured on real use (prices as of October 2026: $0.10 per million input tokens, $0.50 per million output
+tokens):
+
+| What happens | Cost |
+| --- | --- |
+| One suggestion request ("find us a thriller") | about **$0.002** (a fifth of a cent) |
+| A feedback question, or a short reply from the bot | about $0.0005 |
+| Status checks, download notifications, browsing the card | free – they don't use Claude |
+
+So **$5 of credit is roughly 2,500 suggestion requests.** Typical use – a few requests and a feedback
+question per evening – comes to around 10–20 cents a month, and $5 lasts well over a year. Even heavy use
+(ten requests every day) stays under $1 a month.
+
+Prices can change; the [Claude Console](https://console.anthropic.com/) shows what you actually spent under
+*Usage*. Set a monthly spend limit there so there are never surprises.

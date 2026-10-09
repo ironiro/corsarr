@@ -234,3 +234,26 @@ def test_old_jellyfin_header_still_accepted(env):
                               data=json.dumps({"event": "PlaybackStart", "itemId": "1"}))
         assert r.status == 200
     with_client(test)
+
+
+def test_update_api_only_triggers_on_service_installs(env, tmp_path, monkeypatch):
+    from corsarr import updates
+
+    async def fake_check(force=False):
+        return {"current": "a" * 40, "latest": "c" * 40, "behind": 1, "commits": [], "error": ""}
+    monkeypatch.setattr(updates, "check", fake_check)
+    monkeypatch.delenv("CORSARR_UPDATE_TRIGGER", raising=False)
+    trigger = tmp_path / "update-requested"
+
+    async def test(client, rt):
+        await login(client)
+        r = await client.get("/api/update")
+        info = await r.json()
+        assert r.status == 200, info
+        assert info["behind"] == 1 and info["kind"] in ("manual", "docker")
+        assert (await client.post("/api/update", headers=H)).status == 400  # can't update itself
+        monkeypatch.setenv("CORSARR_UPDATE_TRIGGER", str(trigger))
+        assert (await client.post("/api/update")).status == 403  # CSRF header still required
+        assert (await client.post("/api/update", headers=H)).status == 200 and trigger.exists()
+        assert (await (await client.get("/api/update")).json())["updating"] is True
+    with_client(test)

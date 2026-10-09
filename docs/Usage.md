@@ -15,7 +15,7 @@ of its messages. It ignores all other messages.
 | `@bot recommend series based on the series we watched` | series only, referring to the ones you watched |
 | `@bot look for something new, some sci-fi` | only titles that are not in the library yet |
 
-German works just as well (`@bot such einen Thriller für heute Abend`) – the bot replies in whatever language you write to it in.
+German works just as well (`@bot such einen Thriller für heute Abend`) – the bot answers in the language you write in (English or German).
 
 ### The suggestion card
 
@@ -75,9 +75,8 @@ The same settings are in the web interface under *Configuration → Bot behaviou
 - 🏴‍☠️ **Pirate** and 📱 **Gen Z** take turns at random or have a short exchange. If only one is active, only
   that one speaks; with both off the bot writes plainly.
 - The characters avoid repeating themselves: the bot remembers its latest phrasings.
-- **Language:** the bot replies in whatever language you write to it in – text, suggestion card, buttons, reasons
-  and TMDB plot summaries. English and German are fully supported; for other languages it answers in
-  English. Messages it sends on its own (feedback questions, download notifications) use the language last used in the group. A suggestion card keeps its language while browsing.
+- **Language:** the bot speaks English and German and answers in the language you write in – text, suggestion
+  card, buttons, reasons and TMDB plot summaries. Messages in any other language get an English answer. Messages it sends on its own (feedback questions, download notifications) use the language last used in the group. A suggestion card keeps its language while browsing.
 
 ## When Claude is unreachable
 

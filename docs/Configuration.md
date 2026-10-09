@@ -92,7 +92,8 @@ With both characters off, the bot writes in a plain, neutral style.
 - **Status:** state of the bot and of every connection (Telegram, Claude, Jellyfin, Jellyseerr, Jellyfin
   webhook, Sonarr, Radarr) – OK/error with message and time. Checked every 5 minutes (for Claude, only the key
   and model, which is free) and also whenever the bot actually uses a service. Buttons: *Check now*,
-  *Restart bot*.
+  *Restart bot*. Below the bot: **Version** – installed vs. newest version, the changes in between and,
+  for LXC installations, an *Update now* button (→ [Operations](Operations.md#update)).
 ![Events: what the bot understood, suggested and reported](images/events.jpg)
 
 - **Events:** the last 1000 log entries since start, live, with filter and search. Among other things it

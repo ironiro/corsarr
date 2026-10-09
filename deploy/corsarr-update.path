@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for a Corsarr update requested in the web interface
+
+[Path]
+# Created by the app (user corsarr) when someone presses "Update now"
+PathExists=/var/lib/corsarr/update-requested
+Unit=corsarr-update.service
+
+[Install]
+WantedBy=multi-user.target

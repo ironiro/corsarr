@@ -23,10 +23,24 @@ Group ids are always **negative**. Larger groups ("supergroups") start with `-10
 number without `-100`, put it in front. If the status later says "Chat not found", that is almost always
 the cause.
 
-## 2. Claude API
+## 2. Claude API key
 
-1. Create an **API key** in the [Claude Console](https://console.anthropic.com/) (`sk-ant-…`).
-2. Under *Limits* set a **monthly spend limit**, e.g. $2.
+Corsarr uses Claude to understand messages, pick suggestions and write its replies. For that it needs an API
+key from Anthropic. This is separate from a Claude.ai chat subscription – the API is billed per use from
+prepaid credit. A few dollars last a long time ([what does it cost?](Home.md#what-does-it-cost)).
+
+1. Open the [Claude Console](https://console.anthropic.com/) and sign up or log in.
+2. **Add credit:** in the Console's billing settings, add a payment method and buy credit (e.g. $5). The API
+   only works once there is credit on the account.
+3. **Set a limit:** under *Limits*, set a **monthly spend limit** (e.g. $2). Corsarr can then never cost more
+   than that, whatever happens.
+4. **Create the key:** under *API Keys* click *Create Key*, give it a name such as `Corsarr` and create it.
+5. **Copy the key right away** – it starts with `sk-ant-` and is shown only once. If you lose it, simply
+   delete it and create a new one.
+6. Paste it in Corsarr's web interface under *Configuration → Claude API → API key* and save.
+
+Keep the key private: anyone who has it can spend your credit. Corsarr stores it only in its data directory
+and never shows it again in the web interface.
 
 If the limit is reached or the API is unreachable, the bot says so once in the group, stops taking requests
 and checks every 5 minutes whether the API is available again. Once it is, the bot announces that it is back.
@@ -59,7 +73,7 @@ Then set up the [webhooks](Webhooks.md) – for feedback after watching (Jellyfi
 
 ## Optional
 
-- **Language:** the bot automatically replies in whatever language you write to it in (English or German).
+- **Language:** the bot speaks English and German and automatically answers in the language you write in.
   Configuration → *System* → Language sets the language of the web interface, and of the bot until someone
   writes to it.
 - **Characters:** Configuration → *Bot behaviour* → pirate / Gen Z on or off. Also possible in the chat:
