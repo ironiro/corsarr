@@ -3,6 +3,8 @@
 In the group the bot only reacts when it is **mentioned** (`@yourbot …`) or when someone **replies** to one
 of its messages. It ignores all other messages.
 
+![A suggestion card, feedback after the movie and download notifications](images/telegram-chat.jpg)
+
 ## Suggestions
 
 | Message | What happens |
