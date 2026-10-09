@@ -31,9 +31,10 @@ come back to it later.
      ([details](Webhooks.md#jellyfin--feedback-after-watching)).
    - **Sonarr / Radarr:** enter the service's address and API key (*Settings → General*) and click
      *Set up in Sonarr* / *Set up in Radarr*. Corsarr creates a webhook named `Corsarr` there (trigger
-     *On File Import* only), or updates it if it already exists. The address and key are only used for this
-     and are **not saved**. If the service still has its own Telegram connection, the assistant warns you –
-     remove it, or every message arrives twice.
+     *On File Import* only), or updates it if it already exists. The address and key are only saved if you
+     tick **Remember access** – then the status page checks the service and its webhook actively (see
+     [status checks](Webhooks.md#status-checks)). If the service still has its own Telegram connection, the
+     assistant warns you – remove it, or every message arrives twice.
    - Next to each service the assistant shows *waiting for the first event* until the first event arrives,
      then *received*.
 
