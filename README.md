@@ -24,10 +24,10 @@ configuration.
 
 ## Quick start
 
-**Proxmox LXC** (Debian 12, 1 core, 512 MB) – as root inside the container:
+**Proxmox** – in the Proxmox host shell; creates a Debian 12 container (1 core, 512 MB) and installs Corsarr in it:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)"
 ```
 
 **Docker:**
@@ -38,7 +38,7 @@ docker compose up -d
 ```
 
 Then open `http://<ip>:8787/` and enter your Telegram, Claude, Jellyfin and Jellyseerr details under **Configuration**.
-To update, run the same command again, or run `docker compose pull && docker compose up -d`.
+To update, see [Installation](docs/Installation.md); with Docker run `docker compose pull && docker compose up -d`.
 
 ## Documentation
 

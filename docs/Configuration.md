@@ -62,7 +62,7 @@ Telegram part starts as soon as everything is there.
 
 | Name | Meaning |
 | --- | --- |
-| `LANGUAGE` | `de` or `en` – language of the web interface, and of the bot until someone writes to it. After that the bot answers in the language of each message. The log is always English. |
+| `LANGUAGE` | `en` (default) or `de` – language of the web interface, and of the bot until someone writes to it. After that the bot answers in the language of each message. The log is always English. |
 | `LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
 | `DATA_DIR` | Data directory. **Only** via environment/`.env`, not in the web interface. LXC: `/var/lib/corsarr`, Docker: `/data`, run manually: `./data` |
 

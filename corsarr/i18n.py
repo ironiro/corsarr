@@ -15,15 +15,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-LANGUAGES = ("de", "en")
-_default = "de"
+LANGUAGES = ("en", "de")
+_default = "en"
 _current: ContextVar[str | None] = ContextVar("language", default=None)
 
 
 def set_language(lang: str) -> None:
     """Default language (setting LANGUAGE)."""
     global _default
-    _default = lang if lang in LANGUAGES else "de"
+    _default = lang if lang in LANGUAGES else "en"
 
 
 def default_language() -> str:
