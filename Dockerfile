@@ -15,9 +15,12 @@ RUN useradd --uid 1000 --no-create-home --home-dir /data --shell /usr/sbin/nolog
     && mkdir -p /data && chown corsarr:corsarr /data
 USER corsarr
 
-# Commit the image was built from (set by CI) – the web interface compares it with GitHub
+# Release tag or commit the image was built from, and its update channel (set by CI) – the web
+# interface compares them with GitHub
 ARG CORSARR_VERSION=""
+ARG CORSARR_CHANNEL=""
 ENV CORSARR_VERSION=$CORSARR_VERSION \
+    CORSARR_CHANNEL=$CORSARR_CHANNEL \
     DATA_DIR=/data \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

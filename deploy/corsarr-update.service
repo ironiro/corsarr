@@ -4,7 +4,7 @@ Description=Update Corsarr (requested in the web interface)
 [Service]
 Type=oneshot
 Environment=CORSARR_DIR=/opt/corsarr CORSARR_DATA=/var/lib/corsarr CORSARR_BRANCH=main
-ExecStartPre=/bin/rm -f /var/lib/corsarr/update-requested
+# The request file holds the version to install (written by the app, checked by install.sh).
 # Runs a copy of install.sh: the update replaces the original while it is running.
-# Output goes to logs/update.log, which the web interface shows.
-ExecStart=/bin/bash -c 'mkdir -p /var/lib/corsarr/logs && cp /opt/corsarr/deploy/install.sh /run/corsarr-install.sh && bash /run/corsarr-install.sh > /var/lib/corsarr/logs/update.log 2>&1'
+# Output goes to logs/update.log, which the web interface shows. ($$ is a literal $ for systemd.)
+ExecStart=/bin/bash -c 'REF="$$(head -c 64 /var/lib/corsarr/update-requested 2>/dev/null | tr -d "[:space:]")"; rm -f /var/lib/corsarr/update-requested; mkdir -p /var/lib/corsarr/logs && cp /opt/corsarr/deploy/install.sh /run/corsarr-install.sh && CORSARR_REF="$$REF" bash /run/corsarr-install.sh > /var/lib/corsarr/logs/update.log 2>&1'

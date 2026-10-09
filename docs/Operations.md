@@ -36,8 +36,28 @@ To restart only the Telegram part (e.g. after a network problem): web interface 
 
 ## Update
 
-**From the web interface:** under **Status → Version** Corsarr shows the installed version, the newest one on
-GitHub and the list of changes in between. With the LXC/Proxmox installation, **Update now** installs it:
+### Release channels
+
+| Channel | What you get | Docker image |
+| --- | --- | --- |
+| **Stable** (default) | Tested releases (`v1.2.0`) | `:latest` or `:stable` |
+| **Beta** | Pre-releases (`v1.3.0-beta.1`) and every stable release – new features earlier, may have bugs | `:beta` |
+| **Development** | Every commit on `main` – for developers | `:edge` |
+
+Choose the channel under **Configuration → System → Update channel**. With Docker the channel follows the
+image tag in `docker-compose.yml`; a fixed version such as `:1.2.0` never changes on its own.
+
+Before every update the installer copies the database and settings to `backups/pre-update-<date>-<version>/`
+in the data directory (the last five are kept). Each version knows which database format it understands: if
+you switch from beta back to an older stable version and the beta already converted the database, Corsarr
+refuses to start and says so in the web interface instead of damaging the data. Then either update to the
+newer version again, or stop Corsarr and copy `corsarr.db` and `config.json` back from the backup made
+before the update. Configurations from older versions are always taken over.
+
+### Updating
+
+**From the web interface:** under **Status → Version** Corsarr shows the installed version, the newest one in
+your channel with its release notes (or the list of commits on the development channel). With the LXC/Proxmox installation, **Update now** installs it:
 the app drops a request file, a small root service (`corsarr-update.path`) runs the installer, and Corsarr
 restarts. The page reconnects by itself and shows the installer's output. With Docker or a manual install,
 the page shows the command to run instead.
@@ -49,7 +69,7 @@ On the command line:
 
 - **LXC:** in the Proxmox host shell `pct exec <id> -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"` (see [Installation](Installation.md#update)).
 - **Docker:** `docker compose pull && docker compose up -d`
-- **Manual:** `cd /opt/corsarr && git pull && .venv/bin/pip install -r requirements.txt && systemctl restart corsarr`
+- **Manual:** `cd /opt/corsarr && git fetch --tags && git checkout v1.2.0 && .venv/bin/pip install -r requirements.txt && systemctl restart corsarr` (or `git pull` on `main` for the development version)
 
 The database is upgraded automatically on start. Settings are kept.
 

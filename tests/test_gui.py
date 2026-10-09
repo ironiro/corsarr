@@ -239,8 +239,13 @@ def test_old_jellyfin_header_still_accepted(env):
 def test_update_api_only_triggers_on_service_installs(env, tmp_path, monkeypatch):
     from corsarr import updates
 
-    async def fake_check(force=False):
-        return {"current": "a" * 40, "latest": "c" * 40, "behind": 1, "commits": [], "error": ""}
+    checked = []
+
+    async def fake_check(channel, force=False):
+        checked.append(channel)
+        downgrade = channel == "beta"  # pretend beta → stable … just to exercise the confirmation
+        return {"channel": channel, "current": "v1.0.0", "latest": "v1.1.0", "target": "v1.1.0", "behind": 1,
+                "commits": [], "releases": [], "downgrade": downgrade, "error": ""}
     monkeypatch.setattr(updates, "check", fake_check)
     monkeypatch.delenv("CORSARR_UPDATE_TRIGGER", raising=False)
     trigger = tmp_path / "update-requested"
@@ -254,8 +259,14 @@ def test_update_api_only_triggers_on_service_installs(env, tmp_path, monkeypatch
         assert (await client.post("/api/update", headers=H)).status == 400  # can't update itself
         monkeypatch.setenv("CORSARR_UPDATE_TRIGGER", str(trigger))
         assert (await client.post("/api/update")).status == 403  # CSRF header still required
-        assert (await client.post("/api/update", headers=H)).status == 200 and trigger.exists()
+        assert (await client.post("/api/update", headers=H)).status == 200
+        assert trigger.read_text().strip() == "v1.1.0" and checked[-1] == "stable"
         assert (await (await client.get("/api/update")).json())["updating"] is True
+        trigger.unlink()
+        await client.put("/api/config", headers=H, json={"values": {"UPDATE_CHANNEL": "beta"}})
+        assert rt.state != "starting"  # the channel takes effect without restarting the bot
+        assert (await client.post("/api/update", headers=H)).status == 409  # downgrade needs a confirmation
+        assert (await client.post("/api/update", headers=H, json={"downgrade": True})).status == 200
     with_client(test)
 
 

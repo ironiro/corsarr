@@ -69,10 +69,26 @@ Prompts, character texts, bot messages and web interface texts all live in that 
 while understanding it (`Understanding.language`); `CorsarrBot._adopt_language` switches to it and remembers
 it for messages the bot sends on its own. Log lines (`log.*`) are always English.
 
-## Changing the database
+## Changing the database or the configuration
 
 New tables go into `SCHEMA` (`db.py`) with `CREATE TABLE IF NOT EXISTS`. New columns on existing tables must
-also be added to `DB._migrate()` – otherwise existing installations won't have them.
+also be added to `DB._migrate()` – otherwise existing installations won't have them. **Raise `SCHEMA_VERSION`**
+with every such change: an older Corsarr then refuses the converted database instead of misreading it.
+
+Renaming a configuration field or changing what a value means: raise `CONFIG_VERSION` in `config.py` and
+convert older files in `_migrate_overrides()`. New fields need nothing – a missing value means the default.
+
+## Publishing a release
+
+`main` is the development branch. Releases are git tags; the CI builds the Docker images for them.
+
+```bash
+gh release create v1.2.0 --generate-notes              # stable → :latest, :stable, :beta, :1.2.0, :1.2
+gh release create v1.3.0-beta.1 --prerelease --generate-notes   # beta → :beta, :1.3.0-beta.1
+```
+
+Tags must look exactly like `vX.Y.Z` or `vX.Y.Z-beta.N` – other tags are ignored by the update check. The
+release notes are what users see in the web interface before updating. Every push to `main` builds `:edge`.
 
 ## Line endings
 

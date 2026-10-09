@@ -53,7 +53,9 @@ docker compose up -d
 ```
 
 Then open `http://<ip>:8787/` and enter your Telegram, Claude (or another AI provider), Jellyfin and Jellyseerr details under **Configuration**.
-To update, see [Installation](docs/Installation.md); with Docker run `docker compose pull && docker compose up -d`.
+Updates come through the web interface (Status → Version) or with `docker compose pull && docker compose up -d`.
+There are **stable** and **beta** releases; pick your channel under Configuration → System
+([release channels](docs/Operations.md#release-channels)).
 
 ## Documentation
 

@@ -105,7 +105,9 @@ Download `docker-compose.yml` from the repository, then in the same directory:
 docker compose up -d
 ```
 
-The image `ghcr.io/ironiro/corsarr:latest` is available for amd64 and arm64 (Raspberry Pi 4/5). If it
+The image `ghcr.io/ironiro/corsarr:latest` (newest stable release) is available for amd64 and arm64
+(Raspberry Pi 4/5). For pre-releases use `:beta`, for every commit on `main` `:edge`, for a fixed version
+e.g. `:1.2.0` – see [release channels](Operations.md#release-channels). If it
 cannot be pulled, Compose can build it from source instead (this needs a clone of the whole repository):
 `docker compose up -d --build`.
 

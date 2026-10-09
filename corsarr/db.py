@@ -121,13 +121,31 @@ def parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+# Database format version (SQLite user_version). Raise it whenever _migrate changes something, so an
+# older Corsarr – e.g. after switching from beta back to stable – refuses a database it doesn't understand.
+SCHEMA_VERSION = 1
+
+
+class DatabaseTooNew(Exception):
+    """The database was written by a newer Corsarr version."""
+
+    def __init__(self, found: int):
+        super().__init__(f"database version {found}, this Corsarr understands up to {SCHEMA_VERSION}")
+        self.found = found
+
+
 class DB:
     def __init__(self, path: Path):
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        found = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if found > SCHEMA_VERSION:
+            self.conn.close()
+            raise DatabaseTooNew(found)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self._migrate()
+        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
     def _migrate(self) -> None:

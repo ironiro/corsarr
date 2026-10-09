@@ -13,6 +13,10 @@ from pathlib import Path
 from .i18n import LANGUAGES, set_language, t
 
 OVERRIDES_FILE = "config.json"
+# Format version of config.json. Raise it when a field is renamed or its meaning changes, and teach
+# _migrate_overrides how to convert older files – configurations and backups from older versions keep working.
+CONFIG_VERSION = 1
+VERSION_KEY = "_config_version"
 
 # Language model providers. Only Claude is tested; the others use the OpenAI-compatible API.
 PROVIDERS = ("claude", "openai", "gemini", "ollama", "lmstudio")
@@ -45,6 +49,7 @@ class Field:
     app_restart: bool = False  # only takes effect after restarting the whole program
     editable: bool = True
     provider: str = ""  # only used (and only required) when this language model provider is selected
+    live: bool = False  # takes effect without restarting the bot
 
 
 FIELDS: tuple[Field, ...] = (
@@ -74,6 +79,8 @@ FIELDS: tuple[Field, ...] = (
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
     Field("WEBHOOK_SECRET", "web", required=True),
     Field("ADMIN_PASSWORD", "web", secret=True),
+    # Docker images follow the channel of their tag (CORSARR_CHANNEL), so there it is fixed.
+    Field("UPDATE_CHANNEL", "system", default="stable", kind="choice", choices=("stable", "beta", "dev"), live=True),
     Field("LANGUAGE", "system", default="en", kind="choice", choices=LANGUAGES),
     Field("LOG_LEVEL", "system", default="INFO", kind="choice",
           choices=("DEBUG", "INFO", "WARNING", "ERROR")),
@@ -180,14 +187,25 @@ def read_overrides(data_dir: Path) -> dict[str, str]:
     path = data_dir / OVERRIDES_FILE
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = _migrate_overrides(json.loads(path.read_text(encoding="utf-8")))
     return {k: str(v) for k, v in data.items() if k in FIELD_BY_NAME and FIELD_BY_NAME[k].editable}
+
+
+def _migrate_overrides(data: dict) -> dict:
+    """Bring a config.json written by an older version up to CONFIG_VERSION.
+
+    Files from a newer version are read as they are: unknown fields are ignored, known ones still apply.
+    """
+    version = data.get(VERSION_KEY, 1)  # files from before versioning are version 1
+    # A future rename would go here, e.g.:  if version < 2: data["NEW"] = data.pop("OLD", "")
+    return data
 
 
 def write_overrides(data_dir: Path, overrides: dict[str, str]) -> None:
     path = data_dir / OVERRIDES_FILE
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(overrides, indent=2, ensure_ascii=False), encoding="utf-8")
+    data = {VERSION_KEY: CONFIG_VERSION, **{k: v for k, v in overrides.items() if k != VERSION_KEY}}
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     if os.name == "posix":
         os.chmod(tmp, 0o600)  # holds API keys
     os.replace(tmp, path)

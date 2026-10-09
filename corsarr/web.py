@@ -128,6 +128,8 @@ async def _arr_webhook(request: web.Request, service: str, record) -> web.Respon
     if isinstance(event, web.Response):
         return event
     kind = event.get("eventType", "?")
+    if _rt(request).db is None:
+        return web.Response(status=503, text="database unavailable")
     stored = record(_rt(request).db, event)
     log.info(t("log.arr_event", service=service.capitalize(), kind=kind, n=stored))
     health.ok(service, t("check.webhook_last", kind=kind))
@@ -270,7 +272,7 @@ async def api_jellyfin_users(request: web.Request) -> web.Response:
 async def api_update(request: web.Request) -> web.Response:
     """Installed vs. latest version; ?force=1 skips the cache (button "Check for updates")."""
     rt = _rt(request)
-    info = await updates.check(force=request.query.get("force") == "1")
+    info = await updates.check(updates.channel(rt.cfg.get("UPDATE_CHANNEL")), force=request.query.get("force") == "1")
     return web.json_response({**info, "kind": updates.install_kind(), "updating": updates.updating(rt.cfg.data_dir),
                               "log": updates.log_tail(rt.cfg.data_dir)})
 
@@ -278,7 +280,13 @@ async def api_update(request: web.Request) -> web.Response:
 async def api_update_start(request: web.Request) -> web.Response:
     if updates.install_kind() != "service":
         return web.json_response({"error": t("gui.update_not_possible")}, status=400)
-    updates.request_update()
+    # The target is worked out here, never taken from the request.
+    info = await updates.check(updates.channel(_rt(request).cfg.get("UPDATE_CHANNEL")), force=True)
+    if not info.get("target"):
+        return web.json_response({"error": info.get("error") or t("gui.update_none")}, status=400)
+    if info.get("downgrade") and not (await _json_body(request)).get("downgrade"):
+        return web.json_response({"error": t("gui.update_downgrade_confirm", version=info["target"])}, status=409)
+    updates.request_update(info["target"])
     log.info(t("log.update_requested", remote=_remote(request)))
     return web.json_response({"ok": True})
 
@@ -301,11 +309,11 @@ def config_payload(rt: "Runtime") -> dict:
         fields.append({
             "name": f.name, "group": f.group, "required": f.required, "secret": f.secret,
             "kind": f.kind, "choices": list(f.choices), "editable": f.editable,
-            "app_restart": f.app_restart, "default": f.default, "provider": f.provider,
+            "app_restart": f.app_restart, "default": f.default, "provider": f.provider, "live": f.live,
             "value": "" if f.secret else value, "is_set": bool(value),
             "source": cfg.sources.get(f.name, "default"), "error": cfg.errors.get(f.name, ""),
         })
-    settings = rt.db.settings()
+    settings = rt.db.settings() if rt.db else dict(DEFAULT_SETTINGS)
     behaviour = []
     for key, default in DEFAULT_SETTINGS.items():
         lo, hi = SETTING_LIMITS.get(key, (None, None))
@@ -369,7 +377,8 @@ async def api_config_save(request: web.Request) -> web.Response:
             if token != current:
                 sessions.pop(token)
     app_restart = any(config.FIELD_BY_NAME[n].app_restart for n in changed)
-    needs_restart = any(not config.FIELD_BY_NAME[n].app_restart and n != "ADMIN_PASSWORD" for n in changed)
+    needs_restart = any(not config.FIELD_BY_NAME[n].app_restart and not config.FIELD_BY_NAME[n].live
+                        and n != "ADMIN_PASSWORD" for n in changed)
     if needs_restart:
         await rt.restart()
     else:
@@ -395,6 +404,8 @@ async def api_settings_save(request: web.Request) -> web.Response:
                                          status=400)
             lo, hi = SETTING_LIMITS.get(key, (value, value))
             value = max(lo, min(hi, value))
+        if rt.db is None:
+            return web.json_response({"errors": {key: rt.db_error}}, status=503)
         rt.db.set_setting(key, value)
         applied[key] = value
     if applied:
