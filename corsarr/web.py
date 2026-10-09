@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 from aiohttp import web
 
-from . import arr, backup, config, llm, monitor, updates
+from . import arr, backup, config, llm, monitor, setup, updates
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
@@ -291,6 +291,81 @@ async def api_update_start(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+# --- GUI: setup assistant -----------------------------------------------------------
+
+def _setup_error(e: setup.SetupError) -> web.Response:
+    return web.json_response({"ok": False, "error": t(e.key, **e.values)}, status=400)
+
+
+async def api_setup_telegram(request: web.Request) -> web.Response:
+    """Check a bot token and list the groups the bot has seen (for picking the chat id)."""
+    rt = _rt(request)
+    token = str((await _json_body(request)).get("token") or rt.cfg.telegram_token)
+    if not token:
+        return web.json_response({"ok": False, "error": t("cfg.missing", name="TELEGRAM_BOT_TOKEN")}, status=400)
+    try:
+        info = await setup.telegram(token)
+    except setup.SetupError as e:
+        if e.key == "setup.telegram_busy" and rt.state == "running" and token == rt.cfg.telegram_token:
+            info = {"username": rt.corsarr.username if rt.corsarr else "", "privacy": None,
+                    "chats": [{"id": rt.cfg.chat_id, "title": ""}]}  # the running bot already uses this token
+        else:
+            return _setup_error(e)
+    return web.json_response({"ok": True, **info})
+
+
+async def api_setup_test(request: web.Request) -> web.Response:
+    """Test one service with values from the form (not saved yet); empty values mean the saved ones."""
+    rt = _rt(request)
+    body = await _json_body(request)
+    given = body.get("values") if isinstance(body.get("values"), dict) else {}
+    value = lambda name: str(given.get(name) or rt.cfg.get(name)).strip()
+    service = body.get("service")
+    try:
+        if service == "jellyfin":
+            detail = await setup.test_jellyfin(value("JELLYFIN_URL"), value("JELLYFIN_API_KEY"), value("JELLYFIN_USER"))
+        elif service == "jellyseerr":
+            detail = await setup.test_seerr(value("JELLYSEERR_URL"), value("JELLYSEERR_API_KEY"))
+        elif service == "llm":
+            provider = value("LLM_PROVIDER") or config.RECOMMENDED_PROVIDER
+            names = config.PROVIDER_FIELDS.get(provider, {})
+            detail = await setup.test_llm(provider, value(names.get("model", "")) if names else "",
+                                          value(names["key"]) if "key" in names else "",
+                                          value(names["url"]) if "url" in names else "")
+        else:
+            return web.json_response({"ok": False, "error": "unknown service"}, status=400)
+    except setup.SetupError as e:
+        return _setup_error(e)
+    return web.json_response({"ok": True, "detail": detail})
+
+
+def _base_url(request: web.Request) -> str:
+    return f"{request.scheme}://{request.host}"
+
+
+async def api_setup_webhooks(request: web.Request) -> web.Response:
+    rt = _rt(request)
+    return web.json_response({**setup.webhook_urls(_base_url(request), rt.cfg.webhook_secret),
+                              "services": {k: v for k, v in health.snapshot().items()
+                                           if k in ("webhook", "sonarr", "radarr")}})
+
+
+async def api_setup_arr(request: web.Request) -> web.Response:
+    """Create the webhook in Sonarr/Radarr. Their address and key are only used for this, never stored."""
+    rt = _rt(request)
+    body = await _json_body(request)
+    kind = body.get("kind")
+    if kind not in ("sonarr", "radarr"):
+        return web.json_response({"ok": False, "error": "unknown service"}, status=400)
+    hook = setup.webhook_urls(str(body.get("base") or _base_url(request)), rt.cfg.webhook_secret)[kind]
+    try:
+        result = await setup.connect_arr(kind, str(body.get("url") or ""), str(body.get("api_key") or ""), hook)
+    except setup.SetupError as e:
+        return _setup_error(e)
+    log.info(t("log.arr_connected", service=kind.capitalize()))
+    return web.json_response({"ok": True, **result})
+
+
 # --- GUI: backup and restore ------------------------------------------------------
 
 async def api_backup(request: web.Request) -> web.Response:
@@ -474,6 +549,10 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/options/models", api_models)
     app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
     app.router.add_post("/api/update", api_update_start)
+    app.router.add_post("/api/setup/telegram", api_setup_telegram)
+    app.router.add_post("/api/setup/test", api_setup_test)
+    app.router.add_get("/api/setup/webhooks", api_setup_webhooks)
+    app.router.add_post("/api/setup/arr", api_setup_arr)
     app.router.add_post("/api/backup", api_backup)
     app.router.add_post("/api/restore", api_restore)
     app.router.add_get("/api/config", api_config)
