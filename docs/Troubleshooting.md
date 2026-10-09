@@ -10,14 +10,15 @@ Docker: `docker compose logs --tail 50`. Run manually: is the terminal window st
 
 ## The bot doesn't start, status "not set up"
 
-Required values are missing – Status lists them. Enter them under Configuration and save.
+Required values are missing – Status lists them. Run the setup assistant (tab *Setup*), or enter them under
+Configuration and save.
 
 ## Telegram
 
 | Message | Cause / fix |
 | --- | --- |
 | `InvalidToken` | Token copied incorrectly. Get it again from @BotFather (`/token`). |
-| `Chat not found` | Wrong chat id – usually the `-100` in front is missing or doubled. Or the bot is not in the group. |
+| `Chat not found` | Wrong chat id, or the bot is not in the group. Run the Telegram step of the setup assistant again – it finds the group once someone writes in it. |
 | `privacy mode ON` | At @BotFather `/setprivacy` → bot → **Disable**, then remove the bot from the group and invite it again. |
 | `Conflict: terminated by other getUpdates request` | The same bot is running twice (e.g. old laptop and new server). Stop one. |
 
@@ -42,7 +43,7 @@ and only in the configured group. Every incoming message is listed under Events.
 | `HTTP 429` | Rate limit or no credit left with the provider. |
 | "That didn't work" in the chat, `answer does not match the format` in the events | The model did not return the JSON structure Corsarr needs. Try a larger model, or switch back to Claude. |
 
-## Jellyfin / Jellyseerr
+## Jellyfin / Jellyseerr / Seerr
 
 | Message | Cause / fix |
 | --- | --- |
@@ -74,7 +75,9 @@ If the tile stays at "unknown":
 - Check reachability from the service's machine: `curl http://<bot-ip>:8787/health` must return `ok`.
 - Jellyfin: *Playback Stop* ticked? Correct account in the user filter? Destination saved?
 
-If the tile turns red and shows "wrong secret", copy the secret from the web interface again.
+If the tile turns red and shows "wrong secret", copy the address or secret again from *Setup → Webhooks*.
+For Sonarr and Radarr, *Set up in Sonarr* / *Set up in Radarr* there rewrites the webhook with the correct
+values.
 
 ## Jellyfin doesn't start after installing a plugin
 
@@ -90,4 +93,14 @@ In future, restart Jellyfin on the server with `systemctl restart jellyfin` rath
 
 ## Too many download notifications
 
-Remove the old Telegram connections in Sonarr/Radarr – otherwise everything arrives twice. For the Corsarr webhook, tick only *On File Import*.
+Remove the old Telegram connections in Sonarr/Radarr – otherwise everything arrives twice (the setup assistant
+lists them when it sets up the webhook). For the Corsarr webhook, tick only *On File Import*.
+
+## Backup and restore
+
+| Message / problem | Cause / fix |
+| --- | --- |
+| "Backups need a password for this interface" | Set `ADMIN_PASSWORD` under *Configuration → Interface and updates*, then sign in. |
+| "Wrong password for this backup" | Enter the password chosen when the backup was made, not the web interface password. |
+| "The backup was made by a newer Corsarr version" | Update Corsarr to that version first, then restore. |
+| macOS can't open the zip | Archive Utility doesn't support AES encryption. Use 7-Zip, Keka or `7z` – or just restore it in Corsarr. |

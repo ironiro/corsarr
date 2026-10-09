@@ -14,6 +14,7 @@ In the data directory:
 | `corsarr.db` | SQLite: suggestions, rejections, ratings, traits, bot behaviour, download notifications |
 | `config.json` | Settings from the web interface – **contains API keys**, readable by the owner only |
 | `logs/corsarr.log` | Log, rotated at 2 MB, 5 old files kept |
+| `backups/` | Automatic copies made before updates (`pre-update-…`) and restores (`pre-restore-…`) |
 
 ## Logs
 
@@ -22,7 +23,7 @@ In the data directory:
 - Docker: `docker compose logs -f`
 - File: `logs/corsarr.log` in the data directory
 
-For more detail, set *Configuration → System → Log level* to `DEBUG` in the web interface.
+For more detail, set *Configuration → Advanced → Log level* to `DEBUG` in the web interface.
 
 ## Start, stop, restart
 
@@ -44,15 +45,19 @@ To restart only the Telegram part (e.g. after a network problem): web interface 
 | **Beta** | Pre-releases (`v1.3.0-beta.1`) and every stable release – new features earlier, may have bugs | `:beta` |
 | **Development** | Every commit on `main` – for developers | `:edge` |
 
-Choose the channel under **Configuration → System → Update channel**. With Docker the channel follows the
-image tag in `docker-compose.yml`; a fixed version such as `:1.2.0` never changes on its own.
+Releases are git tags `vX.Y.Z` (stable) and `vX.Y.Z-beta.N` (beta). Choose the channel under
+**Configuration → Interface and updates → Update channel**. With Docker the channel follows the image tag in
+`docker-compose.yml`; a fixed version such as `:1.2.0` never changes on its own.
 
 Before every update the installer copies the database and settings to `backups/pre-update-<date>-<version>/`
-in the data directory (the last five are kept). Each version knows which database format it understands: if
-you switch from beta back to an older stable version and the beta already converted the database, Corsarr
-refuses to start and says so in the web interface instead of damaging the data. Then either update to the
-newer version again, or stop Corsarr and copy `corsarr.db` and `config.json` back from the backup made
-before the update. Configurations from older versions are always taken over.
+in the data directory (the last five are kept).
+
+**Going back to an older version:** if your channel's newest release is older than the running one (e.g. after
+switching from beta to stable), the web interface offers it as *Switch to … (older)* and warns first.
+Database and configuration carry format versions: if the newer version already converted the database, the
+older one refuses to start and says so in the web interface instead of damaging the data. Then either update
+to the newer version again, or stop Corsarr and copy `corsarr.db` and `config.json` back from the
+`pre-update-…` backup. Configurations from older versions are always taken over.
 
 ### Updating
 
@@ -75,18 +80,29 @@ The database is upgraded automatically on start. Settings are kept.
 
 ## Backup
 
-**In the web interface (tab *Backup*):** download an encrypted zip with all settings, ratings and the learned
-taste. It contains the credentials that are set – Telegram bot token, the AI provider's API key, the Jellyfin and
-Jellyseerr API keys, the webhook secret and the web interface password – but not the Sonarr/Radarr API keys,
-which Corsarr never saves. It needs a password for the web interface (`ADMIN_PASSWORD`), because the file
-holds the API keys, and you choose a separate password for the zip itself. To restore – also on a fresh
-installation on another machine – upload the zip there and enter that password (on a fresh installation the
-setup assistant offers this as the first step). Backups from older versions are taken over; a backup from a
-newer version is refused until you update. The data being replaced is kept in `backups/pre-restore-…`.
-The zip uses AES encryption, which macOS's Archive Utility cannot open (7-Zip, Keka and `7z` can) – Corsarr
-itself doesn't need that.
+### In the web interface
 
-**By hand:** it is enough to back up the data directory – most importantly `corsarr.db` and `config.json`.
+![The Backup tab](images/backup.jpg)
+
+The **Backup** tab downloads an AES-encrypted zip with all settings, ratings and the learned taste.
+
+- **Password:** you choose a password for the zip (at least 8 characters), independent of the web
+  interface's. Downloading requires a web interface password (`ADMIN_PASSWORD`), because the file contains
+  credentials.
+- **Contents:** the credentials that are set – Telegram bot token, the AI provider's API key, the Jellyfin and
+  Jellyseerr API keys, the webhook secret and the web interface password. The page lists which ones are
+  included. Sonarr/Radarr API keys are **not** included; Corsarr never saves them.
+- **Restore:** upload the zip and enter its password – also on a fresh installation on another machine, where
+  the setup assistant offers *Restore a backup* as the first step and no login is needed. The data being
+  replaced is moved to `backups/pre-restore-…` in the data directory, and the bot restarts.
+- **Versions:** backups from older versions are taken over; a backup from a newer version is refused until you
+  update.
+- **Opening the zip yourself:** macOS's Archive Utility can't open AES-encrypted zips; 7-Zip, Keka and `7z`
+  can. Corsarr itself doesn't need that.
+
+### By hand
+
+It is enough to back up the data directory – most importantly `corsarr.db` and `config.json`.
 
 ```bash
 # LXC – while running, consistent thanks to SQLite's backup (once: apt install sqlite3)
@@ -98,11 +114,17 @@ Proxmox: a normal container backup (vzdump) contains everything.
 
 ## Moving (e.g. from a laptop to the server)
 
+**Easiest:** download a backup on the old machine (tab *Backup*), [install](Installation.md) on the new one
+and choose *Restore a backup* in its setup assistant. Then continue with steps 4 and 5 below.
+
+**By hand:**
+
 1. [Install](Installation.md) on the new machine.
 2. Stop the service there, copy `corsarr.db` and `config.json` from the old data directory into the new one
    and fix the file ownership (LXC: `chown corsarr:corsarr /var/lib/corsarr/*`, Docker directory: `chown 1000:1000`).
 3. Start the service. Learned taste, settings and the webhook secret are carried over.
-4. In **Jellyfin, Sonarr and Radarr** change the webhook address to the new IP.
+4. In **Jellyfin, Sonarr and Radarr** change the webhook address to the new IP. For Sonarr and Radarr,
+   *Setup → Webhooks → Set up in …* updates the existing webhook for you.
 5. Stop the old bot – two bots with the same token interfere with each other.
 
 Upgrading from the old name Filmbot: a `filmbot.db` in the data directory is automatically adopted as

@@ -78,8 +78,8 @@ The same settings are in the web interface under *Configuration → Bot behaviou
 - **Language:** the bot speaks English and German and answers in the language you write in – text, suggestion
   card, buttons, reasons and TMDB plot summaries. Messages in any other language get an English answer. Messages it sends on its own (feedback questions, download notifications) use the language last used in the group. A suggestion card keeps its language while browsing.
 
-## When Claude is unreachable
+## When the AI provider is unreachable
 
-When the spend limit is reached or there is an outage, the bot says so once in the group, stops taking requests
-and checks every 5 minutes. As soon as Claude answers again: "✅ Corsarr is back." Sonarr/Radarr download
-notifications keep arriving in the meantime (they don't need Claude).
+When the spend limit is reached or Claude (or the other provider) has an outage, the bot says so once in the
+group, stops taking requests and checks every 5 minutes. As soon as the provider answers again: "✅ Corsarr is
+back." Sonarr/Radarr download notifications keep arriving in the meantime (they don't need the AI provider).

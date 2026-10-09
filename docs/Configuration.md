@@ -10,14 +10,16 @@ Each value can come from one of three sources. If it is set in more than one, th
 3. **`.env`** in the start directory, or the file `CORSARR_ENV_FILE` points to
 
 Normally you only need the web interface. Files are useful for automated setups. The web
-interface shows where each value currently comes from; **reset** discards the GUI value and uses the
-one from the environment or file again. Template with all names:
+interface marks values from the environment or `.env` with *ENV*; *↺ default* discards the value entered in
+the web interface and uses the one from the environment or file again. Template with all names:
 [`.env.example`](https://github.com/ironiro/corsarr/blob/main/.env.example).
 
 If a required value is missing, only the web interface runs and shows what is missing under Status. The
 Telegram part starts as soon as everything is there.
 
 ## All settings
+
+The groups below match the sections of the Configuration page.
 
 ### Telegram
 
@@ -27,7 +29,7 @@ Telegram part starts as soon as everything is there.
 | `TELEGRAM_CHAT_ID` | yes | Id of the group (negative, often starting with `-100`). The bot only responds in this group. |
 | `NOTIFY_CHAT_ID` | – | Separate chat for Sonarr/Radarr download notifications. If empty, the main group is used. The bot must be a member there. |
 
-### Language model (AI provider)
+### AI provider
 
 | Name | Required | Meaning |
 | --- | --- | --- |
@@ -67,29 +69,37 @@ Notes for the untested providers:
 | `JELLYFIN_API_KEY` | yes | Dashboard → API Keys |
 | `JELLYFIN_USER` | yes | Name or id of the shared account |
 
-### Jellyseerr
+### Jellyseerr / Seerr
+
+Jellyseerr has been merged into Seerr; Seerr and Overseerr use the same API and are entered here too.
 
 | Name | Required | Meaning |
 | --- | --- | --- |
 | `JELLYSEERR_URL` | yes | e.g. `http://192.168.1.21:5055` |
 | `JELLYSEERR_API_KEY` | yes | Settings → General → API Key |
 
-### Web server and webhooks
+### Webhooks
+
+| Name | Required | Meaning |
+| --- | --- | --- |
+| `WEBHOOK_SECRET` | yes* | Shared secret for Jellyfin, Sonarr and Radarr. *Generated automatically on first start. The ready-made webhook addresses are under Setup → Webhooks. |
+
+### Interface and updates
+
+| Name | Required | Meaning |
+| --- | --- | --- |
+| `LANGUAGE` | – | `en` (default) or `de` – language of the web interface, and of the bot until someone writes to it. After that the bot answers in the language of each message. The log is always English. |
+| `ADMIN_PASSWORD` | – | Password for the web interface. Empty = no login. Required for downloading backups. |
+| `UPDATE_CHANNEL` | – | `stable` (default), `beta` or `dev` ([release channels](Operations.md#release-channels)). Applies immediately. |
+
+### Advanced
 
 | Name | Required | Meaning |
 | --- | --- | --- |
 | `WEBHOOK_HOST` | – | Address the web server listens on. Default `0.0.0.0` (all). Takes effect after restarting the program. |
-| `WEBHOOK_PORT` | – | Default `8787`. Takes effect after restarting the program. |
-| `WEBHOOK_SECRET` | yes* | Shared secret for Jellyfin, Sonarr and Radarr. *Generated automatically on first start and shown in the web interface. |
-| `ADMIN_PASSWORD` | – | Password for the web interface. Empty = no login. |
-
-### System
-
-| Name | Meaning |
-| --- | --- |
-| `LANGUAGE` | `en` (default) or `de` – language of the web interface, and of the bot until someone writes to it. After that the bot answers in the language of each message. The log is always English. |
-| `LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
-| `DATA_DIR` | Data directory. **Only** via environment/`.env`, not in the web interface. LXC: `/var/lib/corsarr`, Docker: `/data`, run manually: `./data` |
+| `WEBHOOK_PORT` | – | Port of the web interface and the webhooks. Default `8787`. Takes effect after restarting the program. |
+| `LOG_LEVEL` | – | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
+| `DATA_DIR` | – | Data directory. **Only** via environment/`.env`, not in the web interface. LXC: `/var/lib/corsarr`, Docker: `/data`, run manually: `./data` |
 
 Saving changes in the web interface restarts the Telegram part within the running program – no systemd or container
 restart needed. Exception: `WEBHOOK_HOST`/`WEBHOOK_PORT` (the web server itself) – restart the whole program
@@ -110,33 +120,41 @@ With both characters off, the bot writes in a plain, neutral style.
 
 ## The web interface
 
-Pick one of four looks with the **Design** menu (*arr*, *Terminal*, *Video store*, *Friendly*); the choice is
-remembered in your browser. Besides Status, Events and Configuration there are **Setup** (the setup assistant,
-including the webhooks for Jellyfin, Sonarr and Radarr) and **Backup** (download and restore).
+`http://<bot-ip>:8787/` – five tabs: Status, Events, Configuration, Setup and Backup.
 
-`http://<bot-ip>:8787/`
+Pick a look with the **Design** menu: *Video store* (the default), *\*arr*, *Terminal* or *Friendly*. The
+choice is remembered in your browser.
 
 ![Status: the bot and every connection at a glance](images/status.jpg)
 
 - **Status:** state of the bot and of every connection (Telegram, the AI provider, Jellyfin, Jellyseerr, Jellyfin
-  webhook, Sonarr, Radarr) – OK/error with message and time. Checked every 5 minutes (for Claude, only the key
-  and model, which is free) and also whenever the bot actually uses a service. Buttons: *Check now*,
-  *Restart bot*. Below the bot: **Version** – installed vs. newest version, the changes in between and,
-  for LXC installations, an *Update now* button (→ [Operations](Operations.md#update)).
+  webhook, Sonarr, Radarr) – OK/error with a short detail and time. Checked every 5 minutes (for Claude, only
+  the key and model, which is free) and also whenever the bot actually uses a service. Buttons: *Check now*,
+  *Restart bot*. Below the bot: **Version** – installed vs. newest version in your channel, the changes in
+  between and, for LXC installations, an *Update now* button (→ [Operations](Operations.md#update)).
+
 ![Events: what the bot understood, suggested and reported](images/events.jpg)
 
 - **Events:** the last 1000 log entries since start, live, with filter and search. Among other things it
   shows every message to the bot and how it understood it, every suggestion with its reason and every
   notification.
-![Configuration: bot behaviour and all connection settings](images/configuration.jpg)
 
-- **Configuration:** everything above. *Bot behaviour* saves each change immediately ("✓ saved" next to it);
-  the connection settings below are saved together with **Save**, which is only active when something
-  changed. API keys are never shown – an empty field means "unchanged". The Jellyfin account and the model
-  are picked from lists that Corsarr loads from Jellyfin and from the AI provider; for Claude the model list
-  shows what each model costs compared with the recommended Claude Haiku and warns before switching to an
-  expensive one. Selecting a provider other than Claude shows an "untested" warning and asks for
-  confirmation before saving.
+![Configuration: bot behaviour and the collapsible connection sections](images/configuration.jpg)
+
+- **Configuration:** *Bot behaviour* at the top saves each change immediately ("✓ saved" next to it). Below
+  it, the settings above in collapsible sections – Telegram, AI provider, Jellyfin, Jellyseerr / Seerr,
+  Webhooks, Interface and updates, Advanced. A closed section shows a one-line summary and whether a required
+  field is missing; sections with missing fields open by themselves. Technical names (the variables in the
+  tables above) appear when you hover over a field. Values that come from the environment are marked *ENV*;
+  *↺ default* discards the value entered here. Everything is saved together with **Save**, which is only
+  active when something changed. API keys are never shown – an empty field means "unchanged". The Jellyfin
+  account and the model are picked from lists that Corsarr loads from Jellyfin and from the AI provider; for
+  Claude the model list shows what each model costs compared with the recommended Claude Haiku and warns
+  before switching to an expensive one. Selecting a provider other than Claude shows an "untested" warning
+  and asks for confirmation before saving.
+- **Setup:** the setup assistant (→ [Setup](Setup.md#the-setup-assistant)), including the webhook addresses
+  and the one-click webhook setup for Sonarr and Radarr.
+- **Backup:** download an encrypted backup and restore one (→ [Operations](Operations.md#backup)).
 
 Without `ADMIN_PASSWORD` anyone on your home network can open the web interface and change settings, so
 **don't forward port 8787 to the internet**. Other websites still cannot trigger anything through your
