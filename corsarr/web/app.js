@@ -66,6 +66,25 @@ function clock(ts) {
 
 function clearTimers() { timers.forEach(clearInterval); timers = []; }
 
+// --- skins: one DOM, the look comes from style.css scoped by <html data-skin="…"> ---------------
+// index.html applies the stored skin before the first paint; this only switches and remembers it.
+const SKINS = ["arr", "terminal", "vhs", "soft"];
+const currentSkin = () => document.documentElement.dataset.skin;
+
+function setSkin(name) {
+  document.documentElement.dataset.skin = SKINS.includes(name) ? name : SKINS[0];
+  try { localStorage.setItem("corsarr.skin", currentSkin()); } catch (e) { /* storage blocked: this page only */ }
+}
+
+// onChange re-renders where a skin needs a slightly different structure (e.g. the *arr toolbar).
+function skinSelect(onChange) {
+  return h("label", { class: "skin" }, h("span", {}, T.skin),
+    h("select", { id: "skin", onchange: e => { setSkin(e.target.value); onChange(); } },
+      SKINS.map(s => h("option", { value: s, selected: s === currentSkin() }, T["skin_" + s]))));
+}
+
+const logo = () => h("span", { class: "logo", "aria-hidden": "true" });
+
 async function loadTexts() {
   const data = await fetch("/api/i18n").then(r => r.json());
   T = data.texts;
@@ -93,7 +112,8 @@ function showLogin(error) {
     h("button", { class: "btn primary", type: "submit" }, T.login), msg);
   document.getElementById("app").replaceChildren(
     h("div", { class: "login" }, h("div", { class: "card" },
-      h("h1", {}, "🎬 ", T.title), form, h("p", { class: "hint", style: "margin-top:14px" }, T.login_hint))));
+      h("h1", {}, logo(), T.title), form, h("p", { class: "hint", style: "margin-top:14px" }, T.login_hint),
+      skinSelect(() => {}))));
   pw.focus();
 }
 
@@ -102,12 +122,16 @@ function showApp() {
   clearTimers();
   const tabs = [["status", T.tab_status], ["events", T.tab_events], ["config", T.tab_config]];
   const nav = h("nav", { role: "tablist" }, tabs.map(([id, label]) =>
-    h("button", { role: "tab", "aria-selected": String(tab === id), onclick: () => { tab = id; showApp(); } }, label)));
+    h("button", { role: "tab", "data-tab": id, "aria-selected": String(tab === id), onclick: () => { tab = id; showApp(); } }, label)));
   const header = h("header", {}, h("div", { class: "bar" },
-    h("div", { class: "brand" }, "🎬 ", T.title, h("span", { id: "statepill" })), nav,
-    h("button", { class: "link", id: "logout", hidden: true, onclick: logout }, T.logout)));
+    h("div", { class: "brand" }, logo(), h("span", { class: "name" }, T.title), h("span", { id: "statepill" })), nav,
+    h("div", { class: "tools" }, skinSelect(showApp),
+      h("button", { class: "link", id: "logout", hidden: true, onclick: logout }, T.logout))));
+  // Page title with toolbar – only visible in the *arr skin, which also moves the page actions there.
+  const pagebar = h("div", { class: "pagebar" }, h("h1", {}, tabs.find(([id]) => id === tab)[1]),
+    h("span", { class: "spacer" }), h("div", { id: "pageactions", class: "row" }));
   const main = h("main", { id: "main" });
-  document.getElementById("app").replaceChildren(header, main);
+  document.getElementById("app").replaceChildren(header, pagebar, main);
   ({ status: viewStatus, events: viewEvents, config: viewConfig })[tab](main);
   refreshStatus();
   timers.push(setInterval(refreshStatus, 10000));
@@ -168,8 +192,12 @@ function renderStatus() {
   if (!box || !status) return;
   const s = status;
   const [cls, label] = stateInfo(s);
-  const checkBtn = h("button", { class: "btn", onclick: e => run(e.target, T.checking, "/api/check") }, T.check_now);
-  const restartBtn = h("button", { class: "btn", onclick: e => run(e.target, T.restarting, "/api/restart") }, T.restart);
+  const checkBtn = h("button", { class: "btn", "data-icon": "✓", onclick: e => run(e.target, T.checking, "/api/check") }, T.check_now);
+  const restartBtn = h("button", { class: "btn", "data-icon": "↻", onclick: e => run(e.target, T.restarting, "/api/restart") }, T.restart);
+  // The *arr skin shows the page actions as icon buttons in the top toolbar instead of the bot card.
+  const toolbar = document.getElementById("pageactions");
+  const inToolbar = currentSkin() === "arr" && toolbar;
+  if (toolbar) toolbar.replaceChildren(...(inToolbar ? [checkBtn, restartBtn] : []));
 
   const notices = [];
   if (s.missing.length) {
@@ -181,32 +209,44 @@ function renderStatus() {
   const botCard = h("div", { class: "card" },
     h("div", { class: "row" },
       h("h2", {}, T.bot_state, s.bot_username ? ` @${s.bot_username}` : ""),
-      h("span", { class: `pill ${cls}` }, label), h("span", { class: "spacer" }), checkBtn, restartBtn),
+      h("span", { class: `pill ${cls}` }, label), h("span", { class: "spacer" }), inToolbar ? null : [checkBtn, restartBtn]),
     notices,
     h("dl", { class: "facts" },
       h("dt", {}, T.uptime), h("dd", {}, new Date(s.started_at * 1000).toLocaleString()),
       h("dt", {}, T.data_dir), h("dd", {}, s.data_dir),
       h("dt", {}, T.log_file), h("dd", {}, s.log_file)));
 
-  const services = h("div", { class: "services" },
-    ["telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr"].map(name => {
+  // One row per service: a table in the *arr and terminal skins, cards (cassettes, tiles) in the others.
+  const names = ["telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr"];
+  const head = h("div", { class: "service head", "aria-hidden": "true" }, h("div", { class: "name" }, T.col_service),
+    h("div", { class: "state" }, T.col_status), h("div", { class: "detail" }, T.col_detail), h("div", { class: "meta" }, T.col_checked));
+  const services = h("div", { class: "services" }, head,
+    names.map(name => {
       const st = s.services[name];
       const title = name === "llm" && s.llm ? s.llm.name : T["svc_" + name];
       const untested = name === "llm" && s.llm && !s.llm.recommended
         ? h("span", { class: "pill warn", title: tr("provider_warn", { name: s.llm.name }) }, T.untested) : null;
       const pillCls = { ok: "ok", error: "error" }[st.status] || "";
       const text = { ok: T.status_ok, error: T.status_error, disabled: T.status_disabled }[st.status] || T.status_unknown;
-      return h("div", { class: `service ${pillCls}` },
-        h("div", { class: "row" }, h("h3", {}, title), untested, h("span", { class: "spacer" }),
-          h("span", { class: `pill ${pillCls}` }, text)),
+      return h("div", { class: `service ${st.status}` },
+        h("span", { class: "dot", "aria-hidden": "true" }),
+        h("div", { class: "name" }, h("h3", {}, title), untested),
+        h("div", { class: "state" }, h("span", { class: `pill ${pillCls}`, "data-status": st.status }, text)),
         h("div", { class: "detail" }, st.detail || "–"),
         h("div", { class: "meta" },
           `${T.last_check}: ${ago(st.checked_at, s.now)}`,
-          st.status === "error" ? ` · ${T.last_ok}: ${ago(st.last_ok, s.now)}` : ""));
+          st.status === "error" ? ` · ${T.last_ok}: ${ago(st.last_ok, s.now)}` : ""),
+        h("div", { class: "reels", "aria-hidden": "true" }, h("i"), h("i")));
     }));
 
+  // Summary "n/7 ok" – drawn as a ring in the soft skin (green = ok, orange = error, rest = waiting).
+  const count = st => names.filter(n => s.services[n].status === st).length;
+  const pct = n => `${Math.round(n / names.length * 100)}%`;
+  const ring = h("div", { class: "ring", style: `--ring-ok:${pct(count("ok"))};--ring-err:${pct(count("ok") + count("error"))}` },
+    h("span", {}, tr("services_ok", { n: count("ok"), total: names.length })));
+
   box.replaceChildren(botCard, h("div", { id: "version" }),
-    h("h2", { style: "font-size:16px;margin:24px 0 12px" }, T.connections), services,
+    h("section", { class: "svc-box" }, h("div", { class: "svc-head" }, h("h2", {}, T.connections), ring), services),
     h("p", { class: "disclaimer" }, T.cost_disclaimer));
   renderVersion();
   if (!updateInfo) loadUpdate(false);
@@ -606,6 +646,7 @@ async function saveConfig(btn) {
 
 // --- start ---------------------------------------------------------------------------------
 (async () => {
+  if (!SKINS.includes(currentSkin())) document.documentElement.dataset.skin = SKINS[0];
   await loadTexts();
   try {
     await api("/api/status");
