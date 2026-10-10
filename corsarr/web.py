@@ -18,6 +18,7 @@ from . import arr, backup, config, llm, monitor, setup, updates, usage
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
+from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
 from .monitor import events, health
 
@@ -29,13 +30,14 @@ log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "web"
 COOKIE = "corsarr_session"
 SESSION_TTL = 7 * 24 * 3600
+FONT_CACHE_SECONDS = 30 * 24 * 3600  # the bundled fonts never change between versions
 RUNTIME = web.AppKey("runtime", object)
 SESSIONS = web.AppKey("sessions", dict)
 TASKS = web.AppKey("tasks", set)
 LOGIN_LOCK = web.AppKey("login_lock", asyncio.Lock)
 LOGIN_DELAY = 1.0  # seconds after a failed login; attempts wait for each other, so guessing can't run in parallel
 # Names that always lead into the home network; anything else must be listed in ALLOWED_HOSTS.
-LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".home.arpa", ".internal", ".test", ".fritz.box")
+LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".home.arpa", ".internal", ".test")
 
 
 # --- helpers ---------------------------------------------------------------------
@@ -321,14 +323,13 @@ async def api_jellyfin_users(request: web.Request) -> web.Response:
     key = _form_key(rt.cfg, "JELLYFIN_URL", "JELLYFIN_API_KEY", url, str(body.get("api_key") or ""))
     if not url or not key:
         return web.json_response({"users": [], "error": t("gui.options_need_jellyfin")})
+    jf = Jellyfin(url, key, "", track=False, timeout=10)
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{url}/Users",
-                                 headers={"Authorization": f'MediaBrowser Client="Corsarr", Token="{key}"'})
-            r.raise_for_status()
-            users = sorted(u["Name"] for u in r.json() if u.get("Name"))
+        users = sorted(u["Name"] for u in await jf.users() if u.get("Name"))
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
         return web.json_response({"users": [], "error": monitor.describe_error(e)})
+    finally:
+        await jf.close()
     return web.json_response({"users": users, "error": ""})
 
 
@@ -628,7 +629,7 @@ async def api_settings_save(request: web.Request) -> web.Response:
 async def _font_headers(request: web.Request, response: web.StreamResponse) -> None:
     # Fonts don't change between versions (app.js/style.css get the version in their URL instead).
     if request.path.startswith("/static/fonts/") and response.status == 200:
-        response.headers["Cache-Control"] = "public, max-age=2592000"
+        response.headers["Cache-Control"] = f"public, max-age={FONT_CACHE_SECONDS}"
         if request.path.endswith(".woff2"):  # unknown to some systems' MIME tables
             response.headers["Content-Type"] = "font/woff2"
 

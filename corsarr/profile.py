@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from .db import DB
 from .i18n import t
-from .jellyfin import Jellyfin
+from .jellyfin import Jellyfin, item_label
 from .models import Candidate
 
 log = logging.getLogger(__name__)
@@ -117,17 +117,13 @@ def build_profile(history: list[dict], feedback: list[dict], traits: list[dict])
     people = {name: _signals([fb for fb in feedback if fb.get("rater_name") == name],
                              [tr for tr in traits if tr.get("rater_name") == name]) for name in names}
 
-    def label(it: dict) -> str:
-        year = it.get("ProductionYear")
-        return f"{it.get('Name', '?')} ({year})" if year else it.get("Name", "?")
-
-    liked = [label(it) for it in history if it.get("_favorite")]
+    liked = [item_label(it) for it in history if it.get("_favorite")]
     liked += [fb["title"] for fb in feedback if fb.get("title") and fb["rating"] > 0 and fb["weight"] >= 1]
     disliked = [fb["title"] for fb in feedback if fb.get("title") and fb["rating"] < 0]
     # Separate lists: otherwise many watched movies push every series out of the limit.
     watched = [it for it in history if not it.get("_favorite")]
-    recent_movies = [label(it) for it in watched if it.get("Type") != "Series"]
-    recent_series = [label(it) for it in watched if it.get("Type") == "Series"]
+    recent_movies = [item_label(it) for it in watched if it.get("Type") != "Series"]
+    recent_series = [item_label(it) for it in watched if it.get("Type") == "Series"]
     return Profile(genres=dict(genres), keywords=shared.keywords, traits=shared.traits,
                    liked=_unique(liked)[:HISTORY_TITLES], disliked=_unique(disliked)[:HISTORY_TITLES],
                    recent_movies=_unique(recent_movies)[:HISTORY_TITLES],

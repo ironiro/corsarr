@@ -1,35 +1,15 @@
+"""Configuration, i18n completeness and the web interface (login, CSRF, config API, backups, pickers)."""
 import asyncio
 import json
 import re
 import string
 import time
 
-import pytest
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.test_utils import TestServer
 
 from corsarr import config, i18n, web
-from corsarr.db import DB
 from corsarr.monitor import health
-
-ENV = {
-    "TELEGRAM_BOT_TOKEN": "123:abc", "TELEGRAM_CHAT_ID": "-100", "ANTHROPIC_API_KEY": "sk-test",
-    "JELLYFIN_URL": "http://jf:8096", "JELLYFIN_API_KEY": "jfkey", "JELLYFIN_USER": "Wohnzimmer",
-    "JELLYSEERR_URL": "http://seerr:5055", "JELLYSEERR_API_KEY": "seerrkey", "WEBHOOK_SECRET": "hook",
-    "ADMIN_PASSWORD": "pw",
-}
-
-
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    for f in config.FIELDS:
-        monkeypatch.delenv(f.name, raising=False)
-    monkeypatch.setenv("CORSARR_ENV_FILE", str(tmp_path / "none.env"))
-    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    for k, v in ENV.items():
-        monkeypatch.setenv(k, v)
-    yield monkeypatch
-    i18n.set_language("de")
-    health.reset()
+from helpers import H, login, with_client
 
 
 # --- i18n ----------------------------------------------------------------------------
@@ -57,6 +37,43 @@ def test_every_i18n_key_used_in_code_exists():
     assert len(used) > 150  # the patterns really find the calls
     missing = {k for k in used if k not in i18n.DE}
     assert not missing
+
+
+def _dynamic_key_patterns(py_sources, js):
+    """Regexes for keys the code builds at run time: t(f"prompt.char_{cid}"), T["svc_" + name],
+    T["wiz_" + name + "_title"] – derived from the code, so a new pattern is found, not listed by hand."""
+    patterns = []
+    for src in py_sources:  # t(f"bot.btn_{rating}") -> bot.btn_[a-z_]+
+        for stem in re.findall(r"\bt\(\s*f[\"']([a-z_]+\.[a-z_]*)\{", src):
+            patterns.append(re.compile(re.escape(stem) + r"[A-Za-z0-9_]+"))
+    for expr in re.findall(r"\bT\[((?:\"[a-z_]*\"|[^\"\]]+?)(?:\s*\+\s*(?:\"[a-z_]*\"|[^\"\]+]+?))*)\]", js):
+        pieces = [p.strip() for p in expr.split("+")]
+        quoted = [p.startswith('"') for p in pieces]
+        if all(quoted) or not any(quoted):
+            continue  # a plain literal (counted with the others), or tr()'s own T[key] lookup
+        regex = "".join(re.escape(p.strip('"')) if p.startswith('"') else r"[A-Za-z0-9_]+" for p in pieces)
+        patterns.append(re.compile("gui\\." + regex))
+    assert len(patterns) >= 10, patterns  # the patterns really find the dynamic uses
+    return patterns
+
+
+def test_every_defined_i18n_key_is_used():
+    """The reverse of the test above: no leftover texts. Besides literal uses, keys may be built at run time
+    from a prefix the code names (see _dynamic_key_patterns)."""
+    import pathlib
+    root = pathlib.Path(i18n.__file__).parent
+    py_sources = [p.read_text(encoding="utf-8") for p in root.glob("*.py") if p.name != "i18n.py"]
+    js = (root / "web" / "app.js").read_text(encoding="utf-8")
+    literal = set()
+    for src in py_sources:  # t("x.y"), SetupError("setup.x"), BackupError("backup.x"), dict values …
+        literal |= set(re.findall(r"[\"']([a-z_]+\.[A-Za-z0-9_]+)[\"']", src))
+    # T.name, T["name"], tr("name", …) and tr(cond ? "name" : "other", …)
+    js_literal = re.compile(r"\bT\.([a-z0-9_]+)|\bT\[\"([a-z0-9_]+)\"\]|\btr\(\s*\"([a-z0-9_]+)\""
+                            r"|\btr\(\s*[^\"\n]+\?\s*\"([a-z0-9_]+)\"\s*:\s*\"([a-z0-9_]+)\"")
+    literal |= {"gui." + m for groups in js_literal.findall(js) for m in groups if m}
+    patterns = _dynamic_key_patterns(py_sources, js)
+    unused = {k for k in i18n.EN if k not in literal and not any(p.fullmatch(k) for p in patterns)}
+    assert not unused, sorted(unused)
 
 
 def test_language_switch():
@@ -113,57 +130,6 @@ def test_config_reports_missing_and_invalid_without_exiting(env):
 
 
 # --- web ---------------------------------------------------------------------------------
-
-class FakeRuntime:
-    def __init__(self):
-        self.cfg = config.load()
-        self.db = DB(self.cfg.db_path)
-        self.state, self.state_detail = "running", ""
-        self.started_at = 0.0
-        self.corsarr = None
-        self.feedback = None
-        self.restarts = 0
-        self.checks = 0
-
-    async def restart(self):
-        self.restarts += 1
-        self.cfg = config.load()
-
-    def apply_live_config(self):  # like Runtime.apply_live_config
-        self.cfg = config.load()
-        if seerr := getattr(self, "seerr", None):
-            seerr.set_streaming(self.cfg.streaming_region, self.cfg.streaming_ids)
-
-    async def check(self, manual=False):
-        self.checks += 1
-
-    async def restore(self, settings, database):
-        from corsarr import backup
-        self.db.conn.close()
-        await asyncio.to_thread(backup.restore, self.cfg.data_dir, settings, database)
-        self.cfg = config.load()
-        self.db = DB(self.cfg.db_path)
-
-
-def with_client(test):
-    """Run `test(client, runtime)` against the real web app with a fake runtime."""
-    async def go():
-        rt = FakeRuntime()
-        client = TestClient(TestServer(web.build_app(rt)))
-        await client.start_server()
-        try:
-            await test(client, rt)
-        finally:
-            await client.close()
-    asyncio.run(go())
-
-
-async def login(client, password="pw"):
-    return await client.post("/api/login", json={"password": password})
-
-
-H = {"X-Corsarr": "1"}
-
 
 def test_api_requires_login_and_csrf_header(env):
     async def test(client, rt):
@@ -237,7 +203,7 @@ def test_unknown_host_names_are_refused(env):
     assert web.host_allowed("::1", config.load()) and web.host_allowed("LOCALHOST", config.load())
     assert web.host_allowed("nas.lan", config.load()) and web.host_allowed("pi.local:8787", config.load())
     assert not web.host_allowed("corsarr.example.org", config.load())
-    assert web.host_allowed("corsarr:8787", config.load()) and web.host_allowed("nas.fritz.box", config.load())
+    assert web.host_allowed("corsarr:8787", config.load())
     assert not web.host_allowed("corsarr.example.org.", config.load())
     assert not web.host_allowed("", config.load()) and not web.host_allowed("[::1", config.load())
     env.setenv("ALLOWED_HOSTS", "corsarr.example.org, Other.Example.org")

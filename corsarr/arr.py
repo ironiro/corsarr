@@ -16,7 +16,9 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from .db import DB, iso, now, parse_iso
+from .http import arr_api, arr_headers, borrowed_client
 from .i18n import t
+from .models import label
 
 log = logging.getLogger(__name__)
 
@@ -74,16 +76,11 @@ async def catch_up(db: DB, kind: str, url: str, api_key: str, client: httpx.Asyn
     cursor = db.get_state(cursor_key)
     since = parse_iso(cursor) - CATCH_UP_OVERLAP if cursor else started - CATCH_UP_FIRST
     include = {"includeSeries": "true", "includeEpisode": "true"} if kind == "sonarr" else {"includeMovie": "true"}
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=30)
-    try:
-        r = await client.get(f"{url.rstrip('/')}/api/v3/history/since", headers={"X-Api-Key": api_key},
-                             params={"date": since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **include})
+    async with borrowed_client(client, timeout=30) as c:
+        r = await c.get(f"{arr_api(url)}/history/since", headers=arr_headers(api_key),
+                        params={"date": since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **include})
         r.raise_for_status()
         records = r.json()
-    finally:
-        if own:
-            await client.aclose()
 
     # An upgrade deletes the old file with reason "Upgrade" – the webhook marks those as isUpgrade.
     item = "episodeId" if kind == "sonarr" else "movieId"
@@ -167,6 +164,5 @@ def _ranges(numbers: list[int]) -> str:
 
 
 def _label(item: dict) -> str:
-    year = item.get("year")
-    title = item.get("title") or "?"
-    return f"{title} ({year})" if year else title
+    """Title and year of a Sonarr series / Radarr movie object."""
+    return label(item.get("title"), item.get("year"))

@@ -12,7 +12,7 @@ COPY corsarr ./corsarr
 
 # Runs as an unprivileged user; /data holds database, logs and the GUI's config.json.
 RUN useradd --uid 1000 --no-create-home --home-dir /data --shell /usr/sbin/nologin corsarr \
-    && mkdir -p /data && chown corsarr:corsarr /data
+    && mkdir -p /data && chown corsarr:corsarr /data && chmod 700 /data
 USER corsarr
 
 # Release tag or commit the image was built from, and its update channel (set by CI) – the web

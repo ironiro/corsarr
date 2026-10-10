@@ -526,7 +526,12 @@ class LLM:
                    speaker=persona.speaker_instruction(speaker), request=request,
                    genres_note=genres_note, taste_note=taste_note,
                    candidates=json.dumps(listing, ensure_ascii=False))
-        sel: Selection = await self._call(self._avoid() + prompt, Selection, max_tokens=3000)
+        return await self._select(self._avoid() + prompt, speaker, max_tokens=3000)
+
+    async def _select(self, prompt: str, speaker: str, max_tokens: int) -> Selection:
+        """A Selection with intro and reasons in the speaker's voice (one line each), remembered so the
+        characters don't repeat themselves."""
+        sel: Selection = await self._call(prompt, Selection, max_tokens=max_tokens)
         sel.intro = persona.enforce(sel.intro, speaker)
         for p in sel.picks:
             p.reason = persona.enforce(p.reason.splitlines()[0] if p.reason else "", speaker)
@@ -541,12 +546,7 @@ class LLM:
                     "votes": c.votes, "overview": c.overview[:300]} for i, c in enumerate(cands)]
         prompt = t("prompt.lookup", speaker=persona.speaker_instruction(speaker), request=request,
                    candidates=json.dumps(listing, ensure_ascii=False))
-        sel: Selection = await self._call(self._avoid() + prompt, Selection, max_tokens=1500)
-        sel.intro = persona.enforce(sel.intro, speaker)
-        for p in sel.picks:
-            p.reason = persona.enforce(p.reason.splitlines()[0] if p.reason else "", speaker)
-        self._remember(sel.intro, *(p.reason for p in sel.picks))
-        return sel
+        return await self._select(self._avoid() + prompt, speaker, max_tokens=1500)
 
     async def translate(self, lang: str, texts: dict[str, str]) -> dict[str, str]:
         """Fixed Telegram texts from English into `lang` (see translate.py)."""

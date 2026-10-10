@@ -1,18 +1,12 @@
 """All parts of a film series: find the TMDB collection, show each part's status, request the missing ones."""
-import asyncio
-
 import httpx
 
-from corsarr.bot import CorsarrBot
 from corsarr.jellyseerr import Jellyseerr
 from corsarr.llm import FeedbackIntent, Pick, Selection, SettingsChange, Understanding
 from corsarr.models import Candidate, FilmCollection
 from corsarr.profile import ProfileBuilder
 from corsarr.recommender import Recommender
-
-
-def run(coro):
-    return asyncio.run(coro)
+from helpers import FakeQuery, RequestSeerr, labels, make_bot, run
 
 
 def movie(n, source="new", title=None, year=2000):
@@ -120,80 +114,6 @@ def test_plain_lookup_does_not_look_for_a_collection(db):
 
 # --- bot: the message and its button -------------------------------------------------------------------
 
-class Sent:
-    message_id = 77
-    photo = None
-
-
-class FakeTelegram:
-    def __init__(self):
-        self.photos, self.messages = [], []
-
-    async def send_photo(self, chat_id, photo, caption=None, parse_mode=None, reply_markup=None):
-        self.photos.append((photo, caption, reply_markup))
-        return Sent()
-
-    async def send_message(self, chat_id, text, **kwargs):
-        self.messages.append((text, kwargs))
-        return Sent()
-
-
-class FakeMessage:
-    message_id = 77
-    chat_id = -100
-
-    def __init__(self):
-        self.caption_edits = []
-
-    async def edit_caption(self, caption=None, parse_mode=None, reply_markup=None):
-        self.caption_edits.append((caption, reply_markup))
-
-
-class FakeQuery:
-    def __init__(self, data):
-        self.data = data
-        self.message = FakeMessage()
-        self.from_user = type("U", (), {"first_name": "Sam"})()
-        self.answers = []
-
-    async def answer(self, text=None, **kwargs):
-        self.answers.append((text, kwargs.get("show_alert", False)))
-
-
-class RequestSeerr:
-    def __init__(self, fail=()):
-        self.fail, self.requested = dict(fail), []
-
-    async def request(self, media_type, tmdb_id):
-        self.requested.append((media_type, tmdb_id))
-        if tmdb_id in self.fail:
-            req = httpx.Request("POST", "http://seerr/api/v1/request")
-            raise httpx.HTTPStatusError("x", request=req, response=httpx.Response(self.fail[tmdb_id], request=req))
-        return {"id": tmdb_id}
-
-
-class SayLLM:
-    def __init__(self):
-        self.said = []
-
-    async def say(self, situation, speaker, facts=None):
-        self.said.append(facts)
-        return "📱 on its way"
-
-
-def make_bot(db, seerr=None):
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.seerr, bot.llm = db, seerr or RequestSeerr(), SayLLM()
-    bot.cfg = type("Cfg", (), {"chat_id": -100})()
-    bot.app = type("App", (), {"bot": FakeTelegram()})()
-    bot.speaker = lambda: "normal"
-    return bot
-
-
-def labels(markup):
-    return [[b.text for b in row] for row in markup.inline_keyboard] if markup else []
-
-
 def test_one_message_lists_every_part_with_its_status(db):
     bot = make_bot(db)
     coll = saga()
@@ -206,7 +126,7 @@ def test_one_message_lists_every_part_with_its_status(db):
     assert labels(markup) == [["📥 Fehlende anfragen (2)"]]
     data = markup.inline_keyboard[0][0].callback_data
     assert data == "col:1" and len(data.encode()) <= 64
-    assert db.collection(1)["message_id"] == 77
+    assert db.collection(1)["message_id"] == 42
 
 
 def test_button_requests_only_the_missing_parts_and_shows_who(db):
@@ -218,15 +138,15 @@ def test_button_requests_only_the_missing_parts_and_shows_who(db):
     assert seerr.requested == [("movie", 3), ("movie", 4)]  # not the library part, not the pending one
     assert db.was_requested("movie", 3) and db.was_requested("movie", 4)  # Radarr note "via Corsarr" works
     assert not db.was_requested("movie", 1)
-    assert q.answers == [(None, False)]  # answered right away, the result is in the message
+    assert q.answers == [None]  # answered right away, the result is in the message
     caption, markup = q.message.caption_edits[0]
     assert "📥 Part 3 (2000) · angefragt von Sam" in caption and "📥 Part 4 (2000) · angefragt von Sam" in caption
     assert markup is None  # nothing missing any more: the button is gone
     assert bot.llm.said[0]["titles"] == ["Part 3 (2000)", "Part 4 (2000)"]
-    assert bot.app.bot.messages[0][1]["reply_to_message_id"] == 77
+    assert bot.app.bot.messages[0][1]["reply_to_message_id"] == q.message.message_id
     q2 = FakeQuery("col:1")
     run(bot._cb_collection(q2, 1))  # pressed again (or by the other person at the same time)
-    assert q2.answers == [("Es fehlt nichts mehr ✅", False)] and len(seerr.requested) == 2
+    assert q2.answers == ["Es fehlt nichts mehr ✅"] and len(seerr.requested) == 2
 
 
 def test_a_failed_part_stays_missing_and_an_existing_request_counts(db):
@@ -235,7 +155,7 @@ def test_a_failed_part_stays_missing_and_an_existing_request_counts(db):
     run(bot._send_collection(saga(), ""))
     q = FakeQuery("col:1")
     run(bot._cb_collection(q, 1))
-    assert q.answers == [(None, False)]
+    assert q.answers == [None]
     assert bot.app.bot.messages[0][0] == "1 Anfragen bei Jellyseerr fehlgeschlagen ❌"  # as a message, not a toast
     assert not db.was_requested("movie", 3) and db.was_requested("movie", 4)
     caption, markup = q.message.caption_edits[0]

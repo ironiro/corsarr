@@ -3,8 +3,15 @@ Description=Update Corsarr (requested in the web interface)
 
 [Service]
 Type=oneshot
+# Downloading the code and the Python packages can take a while on a slow line; the installer itself
+# gives up on stalled downloads (git/pip timeouts) long before this.
+TimeoutStartSec=20min
 Environment=CORSARR_DIR=/opt/corsarr CORSARR_DATA=/var/lib/corsarr CORSARR_BRANCH=main
 # The request file holds the version to install (written by the app, checked by install.sh).
 # Runs a copy of install.sh: the update replaces the original while it is running.
-# Output goes to logs/update.log, which the web interface shows. ($$ is a literal $ for systemd.)
-ExecStart=/bin/bash -c 'REF="$$(head -c 64 /var/lib/corsarr/update-requested 2>/dev/null | tr -d "[:space:]")"; rm -f /var/lib/corsarr/update-requested; mkdir -p /var/lib/corsarr/logs && cp /opt/corsarr/deploy/install.sh /run/corsarr-install.sh && CORSARR_REF="$$REF" bash /run/corsarr-install.sh > /var/lib/corsarr/logs/update.log 2>&1'
+# Output goes to /var/log/corsarr/update.log (root-owned, world-readable), which the web interface
+# shows; the app itself never gets a root-written file in its data directory. ($$ is a literal $.)
+ExecStart=/bin/bash -c 'REF="$$(head -c 64 /var/lib/corsarr/update-requested 2>/dev/null | tr -d "[:space:]")"; rm -f /var/lib/corsarr/update-requested; install -d -m 0755 /var/log/corsarr && cp /opt/corsarr/deploy/install.sh /run/corsarr-install.sh && CORSARR_REF="$$REF" bash /run/corsarr-install.sh > /var/log/corsarr/update.log 2>&1; S=$$?; chmod 0644 /var/log/corsarr/update.log; exit $$S'
+# Runs as root, but needs neither /home nor a shared /tmp.
+ProtectHome=yes
+PrivateTmp=yes

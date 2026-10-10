@@ -7,16 +7,7 @@ import pytest
 from corsarr import config, llm, usage
 from corsarr.db import iso, now
 from corsarr.llm import LLM, BudgetReached, LLMFailed
-
-
-class Cfg:
-    def __init__(self, **values):
-        self.values = values
-        self.llm_provider = values.get("LLM_PROVIDER", "claude")
-        self.chat_id = -100
-
-    def get(self, name):
-        return self.values.get(name, "")
+from helpers import FakeConfig as Cfg, make_bot
 
 
 def test_cost_estimate_uses_cache_prices():
@@ -66,34 +57,22 @@ def test_budget_validation():
     assert config.validate(f, "viel") and config.validate(f, "-1")
 
 
-class FakeBot:
-    def __init__(self):
-        self.sent = []
-
-    async def send_message(self, chat_id, text, **kwargs):
-        self.sent.append((chat_id, text))
-
-
 def test_budget_warnings_once_per_level_privately_if_set(db):
-    from corsarr.bot import CorsarrBot
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.cfg = db, Cfg(MONTHLY_BUDGET_USD="1", ADMIN_CHAT_ID="4242")
-    bot.app = type("App", (), {"bot": FakeBot()})()
+    bot = make_bot(db)
+    bot.cfg = Cfg(MONTHLY_BUDGET_USD="1", ADMIN_CHAT_ID="4242")
     run = lambda: asyncio.run(bot.job_budget(None))
     run()
-    assert bot.app.bot.sent == []  # nothing used yet
+    assert bot.app.bot.messages == []  # nothing used yet
     db.add_usage("claude", "claude-haiku-5-5", "text", {"input": 9_000_000})  # ≈ $0.90
     run(); run()
-    assert [c for c, _ in bot.app.bot.sent] == [4242]  # 80 % warning once, to the admin
+    assert bot.app.bot.recipients == [4242]  # 80 % warning once, to the admin
     db.add_usage("claude", "claude-haiku-5-5", "text", {"input": 2_000_000})
     run(); run()
-    assert len(bot.app.bot.sent) == 2 and "⛔" in bot.app.bot.sent[1][1]
+    assert len(bot.app.bot.messages) == 2 and "⛔" in bot.app.bot.messages[1][0]
 
 
 def test_private_message_is_remembered_as_admin_candidate(db):
-    from corsarr.bot import CorsarrBot
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.cfg = db, Cfg()
+    bot = make_bot(db)
     replies = []
 
     class Msg:

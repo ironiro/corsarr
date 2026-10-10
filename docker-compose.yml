@@ -13,11 +13,19 @@ services:
     container_name: corsarr
     restart: unless-stopped
     ports:
-      - "8787:8787"          # web interface + webhooks for Jellyfin, Sonarr, Radarr
+      # Web interface + webhooks for Jellyfin, Sonarr, Radarr. "8787:8787" listens on all interfaces
+      # of the Docker host. To restrict it, put an address in front: "127.0.0.1:8787:8787" (only this
+      # host, e.g. behind a reverse proxy) or "192.168.1.10:8787:8787" (one LAN interface).
+      - "8787:8787"
     volumes:
       - corsarr-data:/data   # database, logs and settings from the web interface
     environment:
       TZ: Europe/Berlin      # time zone for logs and dates
+    logging:                 # keep container logs bounded (the app also logs to /data/logs)
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Optional: settings from a file instead of (or before) the web interface,
     # template: .env.example
     # env_file:

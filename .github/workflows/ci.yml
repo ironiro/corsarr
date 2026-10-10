@@ -6,67 +6,145 @@ on:
     tags: ["v*"]
   pull_request:
 
+# The default token can only read the repository; the docker job raises its own permissions.
+permissions:
+  contents: read
+
+# One run per branch/tag/PR at a time. Superseded PR runs are cancelled; pushes (releases) never are.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 = Debian 12 (what install.sh meets on a fresh LXC), 3.12 = the Docker image.
+        python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
 
+  audit:
+    # Known vulnerabilities in the pinned dependencies (requirements.txt). Blocking: fix by bumping the
+    # package (see docs/Development.md → "Updating dependencies"). If an advisory has no fix yet, add it to
+    # IGNORE below with a comment saying why, and remove it again once a fixed version is pinned.
+    runs-on: ubuntu-latest
+    env:
+      # Space-separated advisory ids to skip, e.g. "GHSA-xxxx-xxxx-xxxx PYSEC-2026-123".
+      IGNORE: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - run: |
+          args=()
+          for id in $IGNORE; do args+=(--ignore-vuln "$id"); done
+          pip-audit -r requirements.txt --no-deps --progress-spinner off "${args[@]}"
+
+  version:
+    # Decides what a push publishes. Mirrors corsarr/updates.py: only vX.Y.Z and vX.Y.Z-beta.N are releases
+    # (anything else tagged v* builds nothing); a beta sorts before the release of the same number.
+    #   channel  stable | beta | dev (push to main) | none
+    #   latest   true when the pushed stable tag is the highest stable version → :latest, :stable
+    #   beta     true when the pushed tag (beta or stable) is the highest version of all → :beta
+    #            (so :beta never moves backwards, and beta users get the release that supersedes their beta:
+    #            the web interface tells them to pull again, which must deliver that release)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
+      latest: ${{ steps.release.outputs.latest }}
+      beta: ${{ steps.release.outputs.beta }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: release
+        run: |
+          python3 - "$GITHUB_REF" "$GITHUB_REF_NAME" "$GITHUB_SHA" <<'PY' | tee -a "$GITHUB_OUTPUT"
+          import re, subprocess, sys
+          ref, name, sha = sys.argv[1:4]
+          TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$")
+
+          def key(tag):
+              m = TAG.match(tag)
+              if not m:
+                  return None
+              major, minor, patch, beta = m.groups()
+              return int(major), int(minor), int(patch), int(beta) if beta is not None else float("inf")
+
+          out = {"publish": "false", "channel": "none", "version": name, "latest": "false", "beta": "false"}
+          if ref == "refs/heads/main":
+              out.update(publish="true", channel="dev", version=sha)
+          elif ref.startswith("refs/tags/") and key(name):
+              tags = [t for t in subprocess.check_output(["git", "tag", "--list"], text=True).split() if key(t)]
+              stable = [t for t in tags if "-" not in t]
+              is_beta = "-" in name
+              highest_all = max(tags, key=key) == name
+              highest_stable = not is_beta and max(stable, key=key) == name
+              out.update(publish="true", channel="beta" if is_beta else "stable",
+                         latest=str(highest_stable).lower(), beta=str(highest_all).lower())
+          print("\n".join(f"{k}={v}" for k, v in out.items()))
+          PY
+
   docker:
     # Publishes ghcr.io/<owner>/corsarr for amd64 and arm64 (e.g. Raspberry Pi).
-    needs: test
-    if: github.event_name == 'push'
+    needs: [test, audit, version]
+    if: github.event_name == 'push' && needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/corsarr  # image names must be lowercase
-          # Release vX.Y.Z → latest, stable, beta, X.Y.Z, X.Y · pre-release vX.Y.Z-beta.N → beta, X.Y.Z-beta.N
-          # · push to main → edge
+          # Release vX.Y.Z → X.Y.Z, X.Y (+ latest, stable when it is the highest stable; + beta when it is the
+          # highest version of all) · pre-release vX.Y.Z-beta.N → X.Y.Z-beta.N, beta · push to main → edge
+          # (see the version job).
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
-            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
-            type=raw,value=beta,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=edge,enable={{is_default_branch}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.version.outputs.channel == 'stable' }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.latest == 'true' }}
+            type=raw,value=stable,enable=${{ needs.version.outputs.latest == 'true' }}
+            type=raw,value=beta,enable=${{ needs.version.outputs.beta == 'true' }}
+            type=raw,value=edge,enable=${{ needs.version.outputs.channel == 'dev' }}
             type=sha,format=short
-      - id: channel
-        # The image tells the web interface which channel it belongs to (and which version it is).
-        run: |
-          case "$GITHUB_REF" in
-            refs/tags/v*-*) echo "channel=beta" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT" ;;
-            refs/tags/v*)   echo "channel=stable" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT" ;;
-            *)              echo "channel=dev" >> "$GITHUB_OUTPUT"; echo "version=$GITHUB_SHA" >> "$GITHUB_OUTPUT" ;;
-          esac
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The image tells the web interface which channel it belongs to (and which version it is).
           build-args: |
-            CORSARR_VERSION=${{ steps.channel.outputs.version }}
-            CORSARR_CHANNEL=${{ steps.channel.outputs.channel }}
+            CORSARR_VERSION=${{ needs.version.outputs.version }}
+            CORSARR_CHANNEL=${{ needs.version.outputs.channel }}
+          provenance: true
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

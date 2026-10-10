@@ -8,7 +8,7 @@ from typing import Awaitable, Callable
 
 from .db import DB, iso, now, parse_iso
 from .i18n import t
-from .jellyfin import Jellyfin
+from .jellyfin import Jellyfin, item_label
 from .jellyseerr import Jellyseerr
 from .models import title_key
 from .profile import ProfileBuilder
@@ -64,7 +64,7 @@ class FeedbackService:
         pct, finished, pos = self._progress(item, event)
         tmdb = (item.get("ProviderIds") or {}).get("Tmdb")
         key = title_key("movie", tmdb, item["Id"])
-        title = _label(item)
+        title = item_label(item)
         if not finished and pos < MIN_WATCH_TICKS:
             return
         self.db.touch_watch_state(item["Id"], key, title, "movie", pct, finished)
@@ -103,7 +103,7 @@ class FeedbackService:
             return
         tmdb = (series.get("ProviderIds") or {}).get("Tmdb")
         key = title_key("tv", tmdb, series_id)
-        title = _label(series)
+        title = item_label(series)
         pct, finished, _ = self._progress(item, event)
         series_done = bool((series.get("UserData") or {}).get("Played"))
         self.db.touch_watch_state(series_id, key, title, "tv", pct, series_done)
@@ -231,11 +231,6 @@ class FeedbackService:
         req["extra"] = extra
         self.profiles.invalidate()
         return fb_id
-
-
-def _label(item: dict) -> str:
-    year = item.get("ProductionYear")
-    return f"{item.get('Name', '?')} ({year})" if year else item.get("Name", "?")
 
 
 def _int(value) -> int:

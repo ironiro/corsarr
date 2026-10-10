@@ -91,12 +91,12 @@ EOF
 say "Installing Corsarr inside the container …"
 ct bash -c "apt-get update -qq && apt-get install -y -qq curl >/dev/null"
 ct CORSARR_BRANCH="$BRANCH" \
-    bash -c "curl -fsSL $REPO_RAW/$BRANCH/deploy/install.sh | bash"
+    bash -c "curl -fsSL --max-time 60 $REPO_RAW/$BRANCH/deploy/install.sh | bash"
 
 IP="$(ct hostname -I | awk '{print $1}')"
 echo
 say "Done: Corsarr runs in container $CTID ($HOSTNAME_CT)."
 echo "    Web interface:  http://${IP:-<container-ip>}:8787/"
-echo "    Update:         pct exec $CTID -- bash -c \"curl -fsSL $REPO_RAW/main/deploy/install.sh | bash\""
+echo "    Update:         in the web interface, or: pct exec $CTID -- bash -c \"curl -fsSL $REPO_RAW/main/deploy/install.sh | bash\""
 echo "    Console:        Proxmox UI → $CTID → Console (logs in automatically), or: pct enter $CTID"
 echo "    Remove:         pct stop $CTID && pct destroy $CTID"

@@ -177,7 +177,7 @@ nav button[aria-selected="true"] { color: var(--strong); border-bottom-color: va
 .skin { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .skin select { width: auto; padding: 3px 6px; font-size: 13px; }
 .pagebar { display: none; }
-main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 96px; }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 32px; }  /* the footer keeps the room for the sticky save bar */
 
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -319,8 +319,6 @@ summary { cursor: pointer; color: var(--muted); }
   .ev .lv { display: none; }
   .log { height: calc(100vh - 300px); }
 }
-.release summary { cursor: pointer; margin-top: 8px; }
-.release summary .pill { margin-left: 6px; }
 .release .notes { white-space: pre-wrap; font-size: 13px; margin: 6px 0 0; max-height: 240px; overflow: auto; }
 
 /* ===================================================================================
@@ -787,7 +785,6 @@ summary { cursor: pointer; color: var(--muted); }
   .copyrow > span:first-child { grid-column: 1 / -1; }
 }
 #version .btn.primary { margin-top: 12px; }
-.release summary { margin-top: 0; }
 
 /* The bot state as a recorder display ("● REC") next to the logo, not a boxed label. */
 [data-skin="vhs"] #statepill .pill {
@@ -840,7 +837,6 @@ details.group > .field:last-child { margin-bottom: 16px; }
 .providers img { border-radius: 4px; flex: none; }
 
 /* --- footer: version and project links (all skins, from the shared variables) ---------------------- */
-main { padding-bottom: 32px; }
 .appfoot {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px;
   max-width: 1040px; margin: 0 auto; padding: 18px 16px 96px; /* room for the sticky save bar */

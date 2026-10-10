@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from . import llm
-from .jellyfin import Jellyfin
+from .http import arr_api, arr_headers, borrowed_client
+from .jellyfin import Jellyfin, auth_header
 from .jellyseerr import Jellyseerr
 from .i18n import t
 from .monitor import describe_error
@@ -45,15 +46,10 @@ async def telegram(token: str, client: httpx.AsyncClient | None = None) -> dict:
     The chat id no longer has to be looked up: add the bot to the group, write something there, and the
     group shows up here. Only works while no other program polls this bot (Corsarr itself included).
     """
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=15)
-    try:
-        me = await _telegram_call(client, token, "getMe")
-        updates = await _telegram_call(client, token, "getUpdates",
+    async with borrowed_client(client, timeout=15) as c:
+        me = await _telegram_call(c, token, "getMe")
+        updates = await _telegram_call(c, token, "getUpdates",
                                        {"timeout": 0, "allowed_updates": ["message", "my_chat_member"]})
-    finally:
-        if own:
-            await client.aclose()
     chats: dict[int, dict] = {}
     for update in reversed(updates):  # newest first
         for key in ("message", "my_chat_member"):
@@ -134,38 +130,33 @@ async def connect_arr(kind: str, url: str, api_key: str, hook_url: str,
 
     Also reports Telegram connections set up there, which would send every download twice.
     """
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=20)
-    api = f"{url.rstrip('/')}/api/v3"
-    headers = {"X-Api-Key": api_key}
+    api, headers = arr_api(url), arr_headers(api_key)
     try:
-        try:
-            r = await client.get(f"{api}/notification", headers=headers)
-        except httpx.HTTPError as e:
-            raise SetupError("setup.unreachable", error=describe_error(e)) from None
-        if r.status_code == 401:
-            raise SetupError("setup.arr_key")
-        if r.status_code != 200:
-            raise SetupError("setup.unreachable", error=f"HTTP {r.status_code}")
-        existing = r.json()
-        telegram = [n.get("name", "") for n in existing if n.get("implementation") == "Telegram"]
-        ours = next((n for n in existing if n.get("implementation") == "Webhook"
-                     and f"/{kind}" in str(_field(n, "url"))), None)
-        if ours is None:
-            schema = (await client.get(f"{api}/notification/schema", headers=headers)).json()
-            ours = next(n for n in schema if n.get("implementation") == "Webhook")
-        hook = _configure(ours, hook_url)
-        if "id" in hook:
-            r = await client.put(f"{api}/notification/{hook['id']}", headers=headers, json=hook)
-        else:
-            r = await client.post(f"{api}/notification", headers=headers, json=hook)
-        if r.status_code >= 400:  # Sonarr/Radarr test the address on saving – e.g. not reachable from there
-            raise SetupError("setup.arr_rejected", error=_arr_error(r))
+        async with borrowed_client(client, timeout=20) as c:
+            try:
+                r = await c.get(f"{api}/notification", headers=headers)
+            except httpx.HTTPError as e:
+                raise SetupError("setup.unreachable", error=describe_error(e)) from None
+            if r.status_code == 401:
+                raise SetupError("setup.arr_key")
+            if r.status_code != 200:
+                raise SetupError("setup.unreachable", error=f"HTTP {r.status_code}")
+            existing = r.json()
+            telegram = [n.get("name", "") for n in existing if n.get("implementation") == "Telegram"]
+            ours = next((n for n in existing if n.get("implementation") == "Webhook"
+                         and f"/{kind}" in str(_field(n, "url"))), None)
+            if ours is None:
+                schema = (await c.get(f"{api}/notification/schema", headers=headers)).json()
+                ours = next(n for n in schema if n.get("implementation") == "Webhook")
+            hook = _configure(ours, hook_url)
+            if "id" in hook:
+                r = await c.put(f"{api}/notification/{hook['id']}", headers=headers, json=hook)
+            else:
+                r = await c.post(f"{api}/notification", headers=headers, json=hook)
+            if r.status_code >= 400:  # Sonarr/Radarr test the address on saving – e.g. not reachable from there
+                raise SetupError("setup.arr_rejected", error=_arr_error(r))
     except (httpx.HTTPError, ValueError, StopIteration, KeyError, TypeError) as e:
         raise SetupError("setup.unreachable", error=describe_error(e)) from None
-    finally:
-        if own:
-            await client.aclose()
     return {"updated": "id" in hook, "telegram": telegram}
 
 
@@ -216,22 +207,18 @@ async def check_jellyfin_hook(url: str, api_key: str, secret: str,
     what is missing; returns (plugin version, the destination's address). Only fields that are present are
     checked – plugin versions differ a little.
     """
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=15)
-    headers = {"Authorization": f'MediaBrowser Client="Corsarr", Token="{api_key}"'}
+    headers = auth_header(api_key)
     base = url.rstrip("/")
     try:
-        plugins = (await client.get(f"{base}/Plugins", headers=headers)).raise_for_status().json()
-        plugin = next((p for p in plugins if str(p.get("Name", "")).lower() == "webhook"), None)
-        if plugin is None:
-            raise SetupError("check.jf_plugin_missing")
-        conf = (await client.get(f"{base}/Plugins/{plugin['Id']}/Configuration", headers=headers)) \
-            .raise_for_status().json()
+        async with borrowed_client(client, timeout=15) as c:
+            plugins = (await c.get(f"{base}/Plugins", headers=headers)).raise_for_status().json()
+            plugin = next((p for p in plugins if str(p.get("Name", "")).lower() == "webhook"), None)
+            if plugin is None:
+                raise SetupError("check.jf_plugin_missing")
+            conf = (await c.get(f"{base}/Plugins/{plugin['Id']}/Configuration", headers=headers)) \
+                .raise_for_status().json()
     except httpx.HTTPError as e:
         raise SetupError("setup.unreachable", error=describe_error(e)) from None
-    finally:
-        if own:
-            await client.aclose()
     destinations = [d for key in ("GenericOptions", "GenericFormOptions") for d in conf.get(key) or []]
     ours = [d for d in destinations if urlsplit(str(d.get("WebhookUri", ""))).path.rstrip("/").endswith("/jellyfin")]
     if not ours:
@@ -259,33 +246,29 @@ async def check_arr(kind: str, url: str, api_key: str, secret: str, send_test: b
     """Sonarr/Radarr reachable, Corsarr's webhook there and active – and, with `send_test`, let it send its
     test event to Corsarr, which checks the whole way back. Returns (version, webhook address); raises
     SetupError."""
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=30)
-    api = f"{url.rstrip('/')}/api/v3"
-    headers = {"X-Api-Key": api_key}
+    api, headers = arr_api(url), arr_headers(api_key)
     try:
-        r = await client.get(f"{api}/system/status", headers=headers)
-        if r.status_code == 401:
-            raise SetupError("setup.arr_key")
-        version = str(r.raise_for_status().json().get("version", ""))
-        existing = (await client.get(f"{api}/notification", headers=headers)).raise_for_status().json()
-        hook = next((n for n in existing if n.get("implementation") == "Webhook"
-                     and f"/{kind}" in str(_field(n, "url")) and f"secret={secret}" in str(_field(n, "url"))), None)
-        if hook is None:
-            raise SetupError("check.arr_hook_missing")
-        if not hook.get("enable", True) or not hook.get("onDownload", False):
-            raise SetupError("check.arr_hook_disabled")
-        if send_test:
-            r = await client.post(f"{api}/notification/test", headers=headers, json=hook)
-            if r.status_code >= 400:
-                raise SetupError("check.arr_test_failed", error=_arr_error(r))
+        async with borrowed_client(client, timeout=30) as c:
+            r = await c.get(f"{api}/system/status", headers=headers)
+            if r.status_code == 401:
+                raise SetupError("setup.arr_key")
+            version = str(r.raise_for_status().json().get("version", ""))
+            existing = (await c.get(f"{api}/notification", headers=headers)).raise_for_status().json()
+            hook = next((n for n in existing if n.get("implementation") == "Webhook"
+                         and f"/{kind}" in str(_field(n, "url")) and f"secret={secret}" in str(_field(n, "url"))),
+                        None)
+            if hook is None:
+                raise SetupError("check.arr_hook_missing")
+            if not hook.get("enable", True) or not hook.get("onDownload", False):
+                raise SetupError("check.arr_hook_disabled")
+            if send_test:
+                r = await c.post(f"{api}/notification/test", headers=headers, json=hook)
+                if r.status_code >= 400:
+                    raise SetupError("check.arr_test_failed", error=_arr_error(r))
     except httpx.HTTPError as e:
         raise SetupError("setup.unreachable", error=describe_error(e)) from None
     except (ValueError, TypeError, AttributeError):
         raise SetupError("setup.unreachable", error="unexpected answer") from None
-    finally:
-        if own:
-            await client.aclose()
     return version, str(_field(hook, "url"))
 
 
@@ -316,14 +299,10 @@ async def points_here(hook_url: str, own_id: str, client: httpx.AsyncClient | No
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return t("check.hook_bad_url", url=hook_url)
     base = f"{parts.scheme}://{parts.netloc}{parts.path.rsplit('/', 1)[0]}"
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=8)
     try:
-        r = await client.get(f"{base}/health", params={"instance": "1"})
-        found = r.json().get("instance") if r.status_code == 200 else None
+        async with borrowed_client(client, timeout=8) as c:
+            r = await c.get(f"{base}/health", params={"instance": "1"})
+            found = r.json().get("instance") if r.status_code == 200 else None
     except (httpx.HTTPError, ValueError, AttributeError):
         return t("check.hook_unreachable", address=parts.netloc)
-    finally:
-        if own:
-            await client.aclose()
     return None if found == own_id else t("check.hook_elsewhere", address=parts.netloc)

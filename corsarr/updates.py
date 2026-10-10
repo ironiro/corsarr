@@ -2,8 +2,10 @@
 
 How an update runs depends on how Corsarr was installed:
 - service (LXC / install.sh): the app only drops a trigger file. A root systemd path unit
-  (deploy/corsarr-update.path) notices it and runs install.sh, which pulls the code, updates
-  dependencies and restarts Corsarr. The app itself never gets write access to its own code.
+  (deploy/corsarr-update.path) notices it and runs install.sh, which prepares the new code and
+  dependencies, restarts Corsarr and rolls back if the new version does not start. Its output goes
+  to a root-owned log (CORSARR_UPDATE_LOG) the app only reads. The app itself never gets write
+  access to its own code.
 - docker: a container can't replace its own image – the web interface shows the command instead.
 - manual: started by hand from a git checkout – the web interface shows `git pull`.
 
@@ -100,8 +102,21 @@ def trigger_path() -> Path | None:
     return Path(value) if value else None
 
 
-RUN_TIMEOUT = 600  # seconds; an update log untouched for longer counts as finished (or stuck)
+RUN_TIMEOUT = 1200  # seconds; an update log untouched for longer counts as finished (or stuck)
 FINISHED = ("Updated and restarted.", "Installed.", "Error:")
+FINAL_LINES = 8  # install.sh ends with one of the FINISHED markers within its last few lines
+
+
+def log_path(data_dir: Path | None) -> Path | None:
+    """Where corsarr-update.service writes the installer's output.
+
+    CORSARR_UPDATE_LOG (the service installation: a root-owned file the app can only read), else
+    logs/update.log in the data directory (older installations, manual runs).
+    """
+    value = os.environ.get("CORSARR_UPDATE_LOG")
+    if value:
+        return Path(value)
+    return data_dir / "logs" / "update.log" if data_dir is not None else None
 
 
 def updating(data_dir: Path | None = None) -> bool:
@@ -109,15 +124,17 @@ def updating(data_dir: Path | None = None) -> bool:
     path = trigger_path()
     if path and path.exists():
         return True
-    if data_dir is None:
+    log = log_path(data_dir)
+    if log is None:
         return False
-    log = data_dir / "logs" / "update.log"
     try:
         fresh = time.time() - log.stat().st_mtime < RUN_TIMEOUT
         text = log.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    return fresh and not any(marker in text for marker in FINISHED)
+    # Only the end counts: the installer may quote service logs (which can contain "Error:") on the way.
+    tail = text.rstrip().splitlines()[-FINAL_LINES:]
+    return fresh and not any(marker in line for line in tail for marker in FINISHED)
 
 
 def request_update(target: str) -> None:
@@ -132,7 +149,9 @@ def request_update(target: str) -> None:
 
 def log_tail(data_dir: Path, lines: int = 25) -> str:
     """End of the last update run's output (written by corsarr-update.service)."""
-    log = data_dir / "logs" / "update.log"
+    log = log_path(data_dir)
+    if log is None:
+        return ""
     try:
         return "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
     except OSError:

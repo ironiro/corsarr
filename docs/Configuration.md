@@ -113,7 +113,7 @@ Jellyseerr has been merged into Seerr; Seerr and Overseerr use the same API and 
 | --- | --- | --- |
 | `WEBHOOK_HOST` | – | Address the web server listens on. Default `0.0.0.0` (all). Takes effect after restarting the program. |
 | `WEBHOOK_PORT` | – | Port of the web interface and the webhooks. Default `8787`. Takes effect after restarting the program. |
-| `ALLOWED_HOSTS` | – | Further host names Corsarr may be reached under, comma-separated (e.g. `corsarr.example.org`). IP addresses, `localhost`, names without a dot (e.g. Docker service names like `corsarr`) and names ending in `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.test` or `.fritz.box` always work; everything else is refused with `403 unknown host` (protection against DNS rebinding). Also applies to webhooks: if Jellyfin, Sonarr or Radarr send to another name, list it here. Applies immediately. |
+| `ALLOWED_HOSTS` | – | Further host names Corsarr may be reached under, comma-separated (e.g. `corsarr.example.org`). IP addresses, `localhost`, names without a dot (e.g. Docker service names like `corsarr`) and names ending in `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.test` always work; everything else is refused with `403 unknown host` (protection against DNS rebinding). Also applies to webhooks: if Jellyfin, Sonarr or Radarr send to another name, list it here. Applies immediately. |
 | `LOG_LEVEL` | – | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
 | `DATA_DIR` | – | Data directory. **Only** via environment/`.env`, not in the web interface. LXC: `/var/lib/corsarr`, Docker: `/data`, run manually: `./data` |
 

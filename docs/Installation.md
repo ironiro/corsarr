@@ -57,7 +57,9 @@ In the Proxmox host shell (replace `105` with your container id):
 pct exec 105 -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"
 ```
 
-Code and dependencies are updated, settings and data are kept, and the service restarts.
+Code and dependencies are updated, settings and data are kept, and the service restarts. The new version is
+prepared next to the running one and only then switched in; if it does not start, the installer puts the
+previous version back (see [Operations → Update](Operations.md#update)).
 
 ### Remove
 
@@ -70,7 +72,9 @@ This deletes the container including all Corsarr data.
 ### Alternative: install into an existing container
 
 If you prefer to create the container yourself (*Create CT* in the Proxmox UI: Debian 12 or Ubuntu
-22.04/24.04, unprivileged, 1 core, 512 MB, 4 GB), open **the container's** console and run:
+24.04, unprivileged, 1 core, 512 MB, 4 GB), enable the **Nesting** feature (*Options → Features*; the
+service's systemd sandbox needs it, otherwise it fails with "Failed to set up mount namespacing"), then open
+**the container's** console and run:
 
 ```bash
 apt-get update && apt-get install -y curl
@@ -88,7 +92,15 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/dep
 4. sets up the systemd service `corsarr` (starts automatically, including after a container restart),
 5. prints the address of the web interface.
 
-Data (database, logs, settings from the web interface) lives in `/var/lib/corsarr` inside the container.
+Data (database, logs, settings from the web interface) lives in `/var/lib/corsarr` inside the container,
+readable only by the service user. Everything root writes stays outside it: copies made before updates in
+`/var/backups/corsarr`, the output of updates started in the web interface in `/var/log/corsarr/update.log`.
+The service runs in a systemd sandbox (read-only system, no capabilities, only `/var/lib/corsarr` writable).
+
+Optional settings as environment variables go into `/etc/corsarr.env` (created empty by the installer, mode
+`0600` because it may hold API keys – keep it that way: `chmod 600 /etc/corsarr.env`). Everything can be set
+in the web interface instead.
+
 Running `install.sh` again updates Corsarr. It accepts `CORSARR_BRANCH`, `CORSARR_DIR` (code directory),
 `CORSARR_DATA` (data directory), `CORSARR_PORT` (for the startup check if you changed the port) and
 `CORSARR_REPO` (your own fork).
@@ -137,16 +149,22 @@ runs as user id 1000, so the directory must be owned by that user: `sudo chown 1
 ## Manual install on Linux
 
 For Linux machines with systemd where the install script doesn't work (e.g. other distributions). Requires
-Python 3.10+, `git`, `python3-venv`.
+Python 3.11+, `git`, `python3-venv`.
 
 ```bash
 sudo useradd --system --home-dir /var/lib/corsarr --shell /usr/sbin/nologin corsarr
-sudo mkdir -p /var/lib/corsarr && sudo chown corsarr:corsarr /var/lib/corsarr
+sudo mkdir -p /var/lib/corsarr && sudo chown corsarr:corsarr /var/lib/corsarr && sudo chmod 750 /var/lib/corsarr
 sudo git clone https://github.com/ironiro/corsarr.git /opt/corsarr
 cd /opt/corsarr && sudo python3 -m venv .venv && sudo .venv/bin/pip install -r requirements.txt
 sudo cp deploy/corsarr.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now corsarr
 ```
+
+Settings as environment variables can go into `/etc/corsarr.env` (`KEY=value` lines); make it readable by
+root only, since it may hold API keys: `sudo chmod 600 /etc/corsarr.env`. The unit file sandboxes the
+service (read-only system, only `/var/lib/corsarr` writable); if your data directory is elsewhere, adjust
+`ReadWritePaths` in it. Without the update service units, the web interface shows the update command instead
+of running it.
 
 Update: `cd /opt/corsarr && sudo git pull && sudo .venv/bin/pip install -r requirements.txt && sudo systemctl restart corsarr`
 

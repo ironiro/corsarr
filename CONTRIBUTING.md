@@ -11,7 +11,7 @@ and names before posting.
 ## Development
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest   # Python 3.11 or newer
 .venv/bin/python -m pytest -q
 .venv/bin/python -m corsarr      # then open http://localhost:8787/
 ```
@@ -29,6 +29,9 @@ to add a language.
 - Changing the database or the meaning of a setting? Read "Changing the database or the configuration" in
   [docs/Development.md](docs/Development.md) – older installations must keep working.
 - Add a line to [CHANGELOG.md](CHANGELOG.md) under **Unreleased**.
+- Dependencies: edit `requirements.in` and regenerate the pinned `requirements.txt` ("Updating dependencies" in
+  [docs/Development.md](docs/Development.md)). Dependabot opens weekly update PRs, and CI fails on known
+  vulnerabilities (`pip-audit`), so bumps usually arrive on their own.
 - Never commit real API keys, tokens, IP addresses or personal data – also not in screenshots.
 - Corsarr is licensed under [GPL-3.0](LICENSE); by opening a pull request you agree that your contribution is
   published under it.

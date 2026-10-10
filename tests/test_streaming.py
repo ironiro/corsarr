@@ -6,12 +6,12 @@ from dataclasses import asdict
 import httpx
 
 from corsarr import config
-from corsarr.bot import CAPTION_LIMIT, CorsarrBot
+from corsarr.bot import CorsarrBot
+from corsarr.cards import CAPTION_LIMIT
 from corsarr.jellyseerr import Jellyseerr, subscribed
 from corsarr.models import Candidate
 
-from test_carousel import make_bot
-from test_gui import H, env, login, with_client  # noqa: F401  (env is a fixture)
+from helpers import H, login, make_bot, with_client
 
 # Shape of Seerr's movie/tv details field `watchProviders` (server/models/common.ts: mapWatchProviders)
 WATCH = [
@@ -97,7 +97,7 @@ def test_cards_saved_before_the_field_existed_still_load(db):
     assert markup.inline_keyboard[0][0].text == "📥 Anfragen"  # requesting stays possible
 
 
-def test_streaming_settings_are_validated_and_region_follows_language(env):  # noqa: F811
+def test_streaming_settings_are_validated_and_region_follows_language(env):
     cfg = config.load()
     assert cfg.streaming_region == "US" and cfg.streaming_ids == set()  # English by default; no services = off
     env.setenv("LANGUAGE", "de")
@@ -111,7 +111,7 @@ def test_streaming_settings_are_validated_and_region_follows_language(env):  # n
     assert set(config.load().errors) == {"STREAMING_PROVIDERS", "STREAMING_REGION"}
 
 
-def test_streaming_picker_api_and_live_save(env):  # noqa: F811
+def test_streaming_picker_api_and_live_save(env):
     from aiohttp import web as aioweb
     from aiohttp.test_utils import TestServer
     keys = []
