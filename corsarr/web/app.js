@@ -134,10 +134,22 @@ function showApp() {
   const pagebar = h("div", { class: "pagebar" }, h("h1", {}, tabs.find(([id]) => id === tab)[1]),
     h("span", { class: "spacer" }), h("div", { id: "pageactions", class: "row" }));
   const main = h("main", { id: "main" });
-  document.getElementById("app").replaceChildren(header, pagebar, main);
+  document.getElementById("app").replaceChildren(header, pagebar, main, footer());
   ({ status: viewStatus, events: viewEvents, config: viewConfig, setup: viewSetup, backup: viewBackup })[tab](main);
   refreshStatus();
   timers.push(setInterval(refreshStatus, 10000));
+}
+
+// Footer like on open source apps: name and running version, links to the project, the licence.
+function footer() {
+  const repo = `https://github.com/${status?.repo || "ironiro/corsarr"}`;
+  const link = (href, label) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, label);
+  return h("footer", { class: "appfoot" },
+    h("span", {}, "Corsarr ", h("code", { id: "footver" }, status ? fmtVersion(status.version) : ""),
+      " · ", link(`${repo}/blob/main/LICENSE`, T.foot_license)),
+    h("nav", { "aria-label": T.foot_links },
+      link(repo, "GitHub"), link(`${repo}/blob/main/docs/Home.md`, T.foot_docs),
+      link(`${repo}/releases`, T.foot_releases), link(`${repo}/issues/new`, T.foot_issue)));
 }
 
 async function logout() {
@@ -164,6 +176,8 @@ async function refreshStatus() {
   // After an update (button, command line or automatic) load the new interface instead of the old one.
   if (loadedVersion === null) loadedVersion = status.version || "";
   else if (status.version && status.version !== loadedVersion) { location.reload(); return; }
+  const footVer = document.getElementById("footver");
+  if (footVer) footVer.textContent = fmtVersion(status.version);
   const logoutBtn = document.getElementById("logout");
   if (logoutBtn) logoutBtn.hidden = !status.auth;  // no login configured = nothing to sign out of
   const [cls, label] = stateInfo(status);
