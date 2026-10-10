@@ -11,9 +11,15 @@ from datetime import datetime, timedelta, timezone
 from . import llm
 from .config import Config
 from .db import DB, now
-from .i18n import t
+from .i18n import language, t
 
 WARN_SHARE = 0.8  # warn once at 80 % of the budget
+
+
+def usd(amount: float) -> str:
+    """A $ amount precise enough for small budgets (0.016 must not read as 0.02), German with a comma."""
+    text = f"{amount:.2f}" if amount >= 1 or amount == 0 else f"{amount:.3f}" if amount >= 0.01 else f"{amount:.4f}"
+    return text.replace(".", ",") if language() == "de" else text
 
 
 def month_start(at: datetime | None = None) -> datetime:
@@ -67,7 +73,7 @@ def budget_reached(db: DB, cfg: Config) -> str | None:
     budget = budget_usd(cfg)
     cost = month_cost(db) if budget else None
     if budget and cost is not None and cost >= budget:
-        return t("check.budget_reached", cost=f"{cost:.2f}", budget=f"{budget:.2f}")
+        return t("check.budget_reached", cost=usd(cost), budget=usd(budget))
     return None
 
 

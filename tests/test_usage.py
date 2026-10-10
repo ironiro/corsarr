@@ -108,3 +108,11 @@ def test_private_message_is_remembered_as_admin_candidate(db):
     assert "777" in replies[0] and "admin" in replies[0].lower()
     import json
     assert json.loads(db.get_state("private_chats"))[0]["name"] == "Sam Example"
+
+
+def test_small_amounts_are_not_rounded_up_to_the_budget():
+    from corsarr import i18n
+    with i18n.use_language("de"):
+        assert usage.usd(0.016) == "0,016" and usage.usd(0.0004) == "0,0004" and usage.usd(2) == "2.00".replace(".", ",")
+    with i18n.use_language("en"):
+        assert usage.usd(0.016) == "0.016" and usage.usd(12.5) == "12.50"

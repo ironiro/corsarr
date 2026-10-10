@@ -840,9 +840,10 @@ class CorsarrBot:
         month = usage.month_start().strftime("%Y-%m")
         warned = self.db.get_state(f"budget_warned:{month}") or ""
         if cost >= budget and warned != "100":
-            text, level = t("bot.budget_reached", cost=f"{cost:.2f}", budget=f"{budget:.2f}"), "100"
+            text, level = t("bot.budget_reached", cost=usage.usd(cost), budget=usage.usd(budget)), "100"
         elif cost >= usage.WARN_SHARE * budget and not warned:
-            text, level = t("bot.budget_warning", cost=f"{cost:.2f}", budget=f"{budget:.2f}"), "80"
+            text, level = t("bot.budget_warning", cost=usage.usd(cost), budget=usage.usd(budget),
+                            pct=round(100 * cost / budget)), "80"
         else:
             return
         target = int(self.cfg.get("ADMIN_CHAT_ID") or 0) or self.cfg.chat_id
@@ -852,7 +853,7 @@ class CorsarrBot:
             log.warning(t("log.notify_failed", error=e))
             return
         self.db.set_state(f"budget_warned:{month}", level)
-        log.info(t("log.budget_warned", level=level, cost=f"{cost:.2f}", budget=f"{budget:.2f}"))
+        log.info(t("log.budget_warned", level=level, cost=f"{cost:.4f}", budget=f"{budget:.2f}"))
 
     async def job_catch_up(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Imports whose webhook never arrived (Corsarr offline, network) – only with remembered access."""

@@ -2,6 +2,8 @@
 
 ## Unreleased (beta)
 
+- Budget messages show small amounts precisely (0,016 $ instead of 0,02 $) and the share in per cent; the
+  80 % warning says clearly that everything keeps working.
 - The status checks for the Jellyfin webhook plugin and Sonarr/Radarr also verify that the address entered
   there leads to this Corsarr (an old address after a move went unnoticed so far).
 - A logo for Corsarr (also the web interface's favicon), a reworked README, issue and pull request templates,
