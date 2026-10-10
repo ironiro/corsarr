@@ -202,6 +202,7 @@ def status_payload(rt: "Runtime") -> dict:
         "language": language(),
         "auth": bool(rt.cfg.admin_password),
         "version": updates.current_version() or "",
+        "repo": updates.UPSTREAM,  # GitHub owner/repo – links in the footer (a fork links to itself)
         "usage": usage.summary(rt.db, rt.cfg) if rt.db else None,
         "llm": {"provider": rt.cfg.llm_provider, "model": rt.cfg.model,
                 "name": config.PROVIDER_NAMES.get(rt.cfg.llm_provider, rt.cfg.llm_provider),
