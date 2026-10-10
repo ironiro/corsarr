@@ -152,7 +152,8 @@ class Jellyseerr:
 
     async def watch_regions(self) -> list[dict]:
         """[{code, name}] of the countries TMDB has streaming data for, sorted by name."""
-        data = await self._get("/watchproviders/regions")
+        # The watch provider routes accept no "language" (Seerr's API spec rejects unknown parameters with 400)
+        data = await self._get("/watchproviders/regions", localized=False)
         regions = [{"code": r["iso_3166_1"], "name": r.get("native_name") or r.get("english_name") or r["iso_3166_1"]}
                    for r in data if r.get("iso_3166_1")]
         return sorted(regions, key=lambda r: r["name"].casefold())
@@ -160,8 +161,8 @@ class Jellyseerr:
     async def watch_providers(self, region: str) -> list[dict]:
         """[{id, name, logo}] of the streaming services in a country – movies and series together,
         the most popular first (TMDB's display priority)."""
-        movies, tv = await asyncio.gather(self._get("/watchproviders/movies", watchRegion=region),
-                                          self._get("/watchproviders/tv", watchRegion=region))
+        movies, tv = await asyncio.gather(self._get("/watchproviders/movies", localized=False, watchRegion=region),
+                                          self._get("/watchproviders/tv", localized=False, watchRegion=region))
         found: dict[int, dict] = {}
         for p in [*movies, *tv]:
             if p.get("id") is None or not p.get("name"):
