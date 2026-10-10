@@ -5,6 +5,8 @@ a step's test passed.
 """
 from __future__ import annotations
 
+import secrets
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -13,6 +15,7 @@ import httpx
 from . import llm
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
+from .i18n import t
 from .monitor import describe_error
 
 TELEGRAM_API = "https://api.telegram.org"
@@ -206,11 +209,12 @@ def _arr_error(r: httpx.Response) -> str:
 # --- status checks of the webhook senders --------------------------------------------------------
 
 async def check_jellyfin_hook(url: str, api_key: str, secret: str,
-                              client: httpx.AsyncClient | None = None) -> str:
+                              client: httpx.AsyncClient | None = None) -> tuple[str, str]:
     """Is the Jellyfin Webhook plugin installed, and does one of its destinations point at Corsarr?
 
     Uses the Jellyfin API key Corsarr has anyway. Returns the plugin version; raises SetupError naming
-    what is missing. Only fields that are present are checked – plugin versions differ a little.
+    what is missing; returns (plugin version, the destination's address). Only fields that are present are
+    checked – plugin versions differ a little.
     """
     own = client is None
     client = client or httpx.AsyncClient(timeout=15)
@@ -241,7 +245,7 @@ async def check_jellyfin_hook(url: str, api_key: str, secret: str,
     types = hook.get("NotificationTypes")
     if isinstance(types, list) and all(isinstance(x, str) for x in types) and "PlaybackStop" not in types:
         raise SetupError("check.jf_hook_type")
-    return str(plugin.get("Version") or "")
+    return str(plugin.get("Version") or ""), str(hook.get("WebhookUri", ""))
 
 
 def _jellyfin_secret_ok(destination: dict, secret: str) -> bool:
@@ -251,9 +255,10 @@ def _jellyfin_secret_ok(destination: dict, secret: str) -> bool:
 
 
 async def check_arr(kind: str, url: str, api_key: str, secret: str, send_test: bool = False,
-                    client: httpx.AsyncClient | None = None) -> str:
+                    client: httpx.AsyncClient | None = None) -> tuple[str, str]:
     """Sonarr/Radarr reachable, Corsarr's webhook there and active – and, with `send_test`, let it send its
-    test event to Corsarr, which checks the whole way back. Returns the version; raises SetupError."""
+    test event to Corsarr, which checks the whole way back. Returns (version, webhook address); raises
+    SetupError."""
     own = client is None
     client = client or httpx.AsyncClient(timeout=30)
     api = f"{url.rstrip('/')}/api/v3"
@@ -281,4 +286,44 @@ async def check_arr(kind: str, url: str, api_key: str, secret: str, send_test: b
     finally:
         if own:
             await client.aclose()
-    return version
+    return version, str(_field(hook, "url"))
+
+
+# --- does a webhook address lead to this Corsarr? -----------------------------------------------------
+
+INSTANCE_FILE = "instance-id"
+
+
+def instance_id(data_dir: Path) -> str:
+    """Random id of this installation; /health?instance=1 answers with it (see points_here)."""
+    path = data_dir / INSTANCE_FILE
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        value = secrets.token_hex(8)
+        path.write_text(value, encoding="utf-8")
+        return value
+
+
+async def points_here(hook_url: str, own_id: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """None when the address in Jellyfin/Sonarr/Radarr leads to this Corsarr, else what is wrong.
+
+    Asks the address itself instead of comparing IPs, so Docker port mappings and reverse proxies are fine:
+    whatever answers there must report this installation's id. (Corsarr has to reach the address the same
+    way the other service does – on a home network it does.)
+    """
+    parts = urlsplit(hook_url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return t("check.hook_bad_url", url=hook_url)
+    base = f"{parts.scheme}://{parts.netloc}{parts.path.rsplit('/', 1)[0]}"
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=8)
+    try:
+        r = await client.get(f"{base}/health", params={"instance": "1"})
+        found = r.json().get("instance") if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return t("check.hook_unreachable", address=parts.netloc)
+    finally:
+        if own:
+            await client.aclose()
+    return None if found == own_id else t("check.hook_elsewhere", address=parts.netloc)

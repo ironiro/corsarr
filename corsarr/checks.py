@@ -119,14 +119,14 @@ async def _check_hook(cfg: Config, hook: str, send_test: bool) -> None:
         if hook == "webhook":
             if not configured(cfg, "jellyfin"):
                 raise LookupError
-            version = await asyncio.wait_for(
+            version, hook_url = await asyncio.wait_for(
                 setup.check_jellyfin_hook(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.webhook_secret), timeout=30)
             detail = t("check.jf_hook_ok", version=version)
         else:
             url, key = cfg.get(f"{hook.upper()}_URL"), cfg.get(f"{hook.upper()}_API_KEY")
             if not (url and key):
                 raise LookupError
-            version = await asyncio.wait_for(
+            version, hook_url = await asyncio.wait_for(
                 setup.check_arr(hook, url, key, cfg.webhook_secret, send_test=send_test), timeout=40)
             detail = t("check.arr_tested" if send_test else "check.arr_ok", version=version)
     except LookupError:  # nothing to check actively
@@ -138,5 +138,9 @@ async def _check_hook(cfg: Config, hook: str, send_test: bool) -> None:
         return
     except Exception as e:  # e.g. timeout – reported, never aborts the other checks
         health.error(hook, describe_error(e))
+        return
+    # The address must lead here – e.g. not to the machine Corsarr ran on before a move
+    if problem := await setup.points_here(hook_url, setup.instance_id(cfg.data_dir)):
+        health.error(hook, problem)
         return
     health.ok(hook, f"{detail} · {state.event}" if state.event else detail)

@@ -105,6 +105,12 @@ failed (for example while Corsarr was restarting for an update). Every 10 minute
 Corsarr reads their history and reports imports that no webhook brought, without sending anything twice and
 skipping quality upgrades like the webhook does. The first run looks back 48 hours.
 
+For all three, Corsarr also checks that the **address** entered there really leads to this Corsarr – e.g. not
+to the machine it ran on before a move: it calls `<that address>/health` itself and expects its own
+installation id back. This works behind Docker port mappings and reverse proxies. It needs Corsarr to reach
+the address the same way the other service does; a container-internal name like `http://corsarr:8787` that only
+Jellyfin's Docker network knows shows up as "can't be reached" even though it works.
+
 Without remembered access, the Sonarr and Radarr tiles only show when the last event arrived. The automatic
 check every 5 minutes never sends test events – only the **Check now** button does.
 
