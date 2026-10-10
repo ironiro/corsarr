@@ -5,12 +5,14 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
+import httpx
+
 from .db import DB
 from .i18n import t
 from .jellyfin import Jellyfin
-from .jellyseerr import Jellyseerr
+from .jellyseerr import POSTER_BASE, Jellyseerr
 from .llm import LLM, Understanding
-from .models import Candidate
+from .models import Candidate, FilmCollection
 from .profile import ProfileBuilder
 
 log = logging.getLogger(__name__)
@@ -33,6 +35,7 @@ class Recommendation:
     intro: str
     picks: list[tuple[Candidate, str]]
     library_count: int
+    collection: FilmCollection | None = None  # set when they asked for all parts of a film series
 
 
 class Recommender:
@@ -132,9 +135,43 @@ class Recommender:
             if 0 <= p.id < len(hits) and all(hits[p.id] is not c for c, _ in picks):
                 picks.append((hits[p.id], p.reason))
         picks = picks[:LOOKUP_PICKS]
+        if und.whole_collection and picks:
+            coll = await self._collection([c for c, _ in picks])
+            if coll is not None:
+                return Recommendation(intro=await self._collection_intro(request, coll, speaker), picks=picks,
+                                      library_count=sum(1 for c in coll.parts if c.source == "library"),
+                                      collection=coll)
         await self.seerr.enrich([c for c, _ in picks])
         return Recommendation(intro=sel.intro, picks=picks,
                               library_count=sum(1 for c, _ in picks if c.source == "library"))
+
+    async def _collection(self, picks: list[Candidate]) -> FilmCollection | None:
+        """The film series the best matching movie belongs to (its details name the collection), or None –
+        then the single-title card is shown instead."""
+        movie = next((c for c in picks if c.media_type == "movie"), None)
+        if movie is None:
+            return None
+        try:
+            ref = (await self.seerr.details("movie", movie.tmdb_id)).get("collection") or {}
+            coll = await self.seerr.collection(int(ref["id"])) if ref.get("id") else None
+        except httpx.HTTPError as e:
+            log.warning(t("log.details_failed", title=movie.label, error=e))
+            return None
+        if coll is None or not coll.parts:
+            log.info(t("log.no_collection", title=movie.label))
+            return None
+        if not coll.poster_url:  # no poster of its own: the one from the details, else the movie's
+            coll.poster_url = f"{POSTER_BASE}{ref['posterPath']}" if ref.get("posterPath") else movie.poster_url
+        log.info(t("log.collection", name=coll.name, n=len(coll.parts),
+                   missing=sum(1 for c in coll.parts if c.source == "new")))
+        return coll
+
+    async def _collection_intro(self, request: str, coll: FilmCollection, speaker: str) -> str:
+        def labels(source: str) -> list[str]:
+            return [c.label for c in coll.parts if c.source == source]
+        return await self.llm.say(t("sit.collection"), speaker, {
+            "request": request, "series": coll.name, "in_library": labels("library"),
+            "requested": labels("pending"), "missing": labels("new")})
 
     async def _new_titles(self, und: Understanding, media_types: list[str], exclude: set[str],
                           recent: set[str]) -> list[Candidate]:
