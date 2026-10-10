@@ -11,12 +11,15 @@ episode.
   first 1–2 from your library, the rest new and requestable. With poster, rating, runtime, a reason and a
   trailer link.
 - **Suggestions from your history:** `@bot what fits what we watched lately?`
+- **Looking up a title** by name or plot description, and **whole film series** with one button for all
+  missing parts.
+- **Where to stream it:** cards for new titles name the streaming services you subscribe to that include them.
 - **Feedback after watching:** movie finished, season done, series paused, movie abandoned – the bot asks
-  and remembers things like *less: gore*.
+  and remembers things like *less: gore*. Each of you rates for yourself, and suggestions respect both tastes.
 - **Download notifications** from Sonarr and Radarr: new episodes one by one, backfilled seasons as one
-  message.
-- **Web interface** with a setup assistant, connection status, event log, the complete configuration and
-  encrypted backup and restore.
+  message; missed webhooks are caught up.
+- **Web interface** with a setup assistant, connection status, usage and estimated cost with an optional
+  monthly budget, event log, the complete configuration and encrypted backup and restore.
 - **Twelve characters** – pirate, Gen Z, butler, film critic, video store clerk, noir detective, trailer voice,
   ship's computer, grandma, sports commentator, cat and bard – each switched on or off on its own. Answers in whatever language you write in
   (web interface in English and German).

@@ -18,7 +18,7 @@ In the data directory:
 
 ## Logs
 
-- Web interface → **Events** (the last 1000 entries since start)
+- Web interface → **Events** (the last 1000 entries, also from before a restart – marked "— restart —")
 - LXC: `journalctl -u corsarr -f`
 - Docker: `docker compose logs -f`
 - File: `logs/corsarr.log` in the data directory

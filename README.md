@@ -26,10 +26,13 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
 - **Feedback:** movie finished, season done, series paused, movie abandoned – the bot asks and remembers
   free text like "too gory" as *less: gore*.
 - **Download notifications:** new episodes one by one, backfilled seasons as a single message
-  ("📦 Grey's Anatomy: 48 episodes from seasons 1–4 are ready").
+  ("📦 Grey's Anatomy: 48 episodes from seasons 1–4 are ready"). Imports whose webhook never arrived (e.g. while
+  Corsarr was restarting) are caught up from the Sonarr/Radarr history.
 - **Web interface** on port 8787: a **setup assistant** (finds your Telegram group by itself, tests every
   connection, creates the Sonarr/Radarr webhooks), connection status, live event log, configuration,
   encrypted **backup and restore**, and four designs to choose from. No config file needed.
+- **Cost control:** the status page shows calls, tokens and the estimated cost; an optional **monthly budget**
+  pauses the bot when it is used up, with a warning at 80 % – privately to you if you like.
 - **Language model:** Claude (recommended and tested). OpenAI (ChatGPT), Google Gemini, Ollama and LM Studio
   are available as alternatives but **not tested** – suggestions may be worse or fail. See
   [Configuration](docs/Configuration.md#ai-provider).

@@ -148,7 +148,8 @@ choice is remembered in your browser.
 
 ![Events: what the bot understood, suggested and reported](images/events.jpg)
 
-- **Events:** the last 1000 log entries since start, live, with filter and search. Among other things it
+- **Events:** the last 1000 log entries, live, with filter and search. Entries from before a restart are read
+  back from the log file and separated by a "— restart —" line. Among other things it
   shows every message to the bot and how it understood it, every suggestion with its reason and every
   notification.
 
