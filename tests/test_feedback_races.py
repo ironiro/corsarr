@@ -7,7 +7,7 @@ from corsarr import feedback as fb_mod
 from corsarr.db import iso, now
 from corsarr.feedback import FeedbackService
 from corsarr.profile import ProfileBuilder
-from test_core import FakeJellyfin, FakeSeerr, make_feedback, movie_item, run
+from helpers import FakeJellyfin, FakeSeerr, make_feedback, movie_item, run
 
 
 class SlowTags(FeedbackService):

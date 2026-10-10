@@ -14,7 +14,7 @@
   <a href="https://github.com/ironiro/corsarr/tags"><img src="https://img.shields.io/github/v/tag/ironiro/corsarr?sort=semver&filter=!*beta*&color=ff3ec9&label=release" alt="Latest release"></a>
   <a href="https://github.com/ironiro/corsarr/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ironiro/corsarr/ci.yml?branch=main&label=build" alt="Build status"></a>
   <a href="https://github.com/ironiro/corsarr/pkgs/container/corsarr"><img src="https://img.shields.io/badge/docker-ghcr.io-2ef2ff?logo=docker&logoColor=white" alt="Docker image"></a>
-  <img src="https://img.shields.io/badge/python-3.12-ffe66d?logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/python-3.11%2B-ffe66d?logo=python&logoColor=white" alt="Python 3.11+">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/ironiro/corsarr?color=7a43b6" alt="GPL-3.0 licence"></a>
 </p>
 
@@ -146,7 +146,7 @@ Pull requests too: see [CONTRIBUTING.md](CONTRIBUTING.md). Found a security prob
 [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest   # Python 3.11 or newer
 .venv/bin/python -m pytest -q      # no credentials or running services needed
 .venv/bin/python -m corsarr
 ```

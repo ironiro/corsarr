@@ -7,39 +7,12 @@ import httpx
 import pytest
 
 from corsarr import arr
-from corsarr.bot import CorsarrBot
 from corsarr.llm import LLM, LLMFailed, LLMUnavailable, _Claude, _OpenAICompatible
 from corsarr.models import Candidate
-from test_arr import age_imports, sonarr
-from test_collections import FakeTelegram, RequestSeerr, SayLLM
-
-
-def run(coro):
-    return asyncio.run(coro)
-
-
-def make_bot(db, seerr=None):
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.seerr, bot.llm, bot.down, bot.genres_loaded = db, seerr or RequestSeerr(), SayLLM(), False, True
-    bot.cfg = type("Cfg", (), {"chat_id": -100})()
-    bot.app = type("App", (), {"bot": FakeTelegram()})()
-    bot.speaker = lambda: "normal"
-    bot._card_locks, bot._nav_wanted, bot._probing = {}, {}, False
-    return bot
+from helpers import FakeMessage, FakeQuery, NoTags, Profiles, RequestSeerr, SayLLM, age_imports, make_bot, run, sonarr
 
 
 # --- B4: a message always gets an answer -------------------------------------------------------------
-
-class Msg:
-    reply_to_message = None
-    from_user = type("U", (), {"first_name": "Sam"})()
-
-    def __init__(self):
-        self.replies = []
-
-    async def reply_text(self, text, **kwargs):
-        self.replies.append(text)
-
 
 def test_unexpected_errors_still_get_the_generic_reply(db):
     bot = make_bot(db)
@@ -53,7 +26,7 @@ def test_unexpected_errors_still_get_the_generic_reply(db):
     async def typing(chat_id, action):
         pass
     bot.app.bot.send_chat_action = typing
-    msg = Msg()
+    msg = FakeMessage()
     run(bot._handle(msg, "something", ctx))
     assert msg.replies == ["🤷 Das hat gerade nicht geklappt – formuliert es bitte noch einmal anders."]
 
@@ -82,33 +55,18 @@ def test_a_failing_recovery_post_does_not_escape_and_recovery_is_posted_once(db)
         from telegram.error import TelegramError
         raise TelegramError("flood")
     bot.app.bot.send_message = failing_post
-    msg = Msg()
+    msg = FakeMessage()
     run(bot._handle(msg, "hi", type("Ctx", (), {"bot": bot.app.bot})()))  # no exception reaches the caller
     assert bot.down is False
 
 
 # --- B10/B11: buttons ---------------------------------------------------------------------------------
 
-class Query:
-    def __init__(self):
-        self.message = type("M", (), {"message_id": 5, "chat_id": -100, "photo": None,
-                                      "reply_markup": None, "text_html": "q"})()
-        self.from_user = type("U", (), {"first_name": "Sam", "id": 1, "full_name": "Sam"})()
-        self.answers = []
-
-        async def edit_text(text, **kwargs):
-            self.message.text_html = text
-        self.message.edit_text = edit_text
-
-    async def answer(self, text=None, **kwargs):
-        self.answers.append(text)
-
-
 def test_already_requested_in_jellyseerr_counts_as_requested(db):
     seerr = RequestSeerr(fail={3: 409})
     bot = make_bot(db, seerr)
     sid = db.add_suggestion(Candidate(media_type="movie", source="new", title="Part 3", year=2000, tmdb_id=3))
-    q = Query()
+    q = FakeQuery()
     run(bot._cb_request(q, sid))
     assert db.suggestion(sid)["status"] == "requested" and q.answers == [None]  # answered right away
     assert bot.llm.said[0]["title"] == "Part 3 (2000)"  # the character still comments
@@ -116,18 +74,16 @@ def test_already_requested_in_jellyseerr_counts_as_requested(db):
     seerr = RequestSeerr(fail={4: 500})
     bot = make_bot(db, seerr)
     sid = db.add_suggestion(Candidate(media_type="movie", source="new", title="Part 4", year=2000, tmdb_id=4))
-    run(bot._cb_request(Query(), sid))
+    run(bot._cb_request(FakeQuery(), sid))
     assert db.suggestion(sid)["status"] == "suggested"
     assert bot.app.bot.messages[-1][0] == "<b>Part 4 (2000)</b> – Anfrage bei Jellyseerr fehlgeschlagen ❌"
 
 
 def test_unknown_rating_values_from_callback_data_are_ignored(db):
     from corsarr.db import now
-    from test_people import NoTags, Profiles
-    bot = make_bot(db)
-    bot.feedback = NoTags(db, None, None, Profiles())
+    bot = make_bot(db, feedback=NoTags(db, None, None, Profiles()))
     rid = db.add_request("movie", "movie:9", "jf9", "Heat (1995)", "movie", now(), status="sent")
-    q = Query()
+    q = FakeQuery()
     run(bot._cb_rating(q, rid, "sideways"))
     assert db.all_feedback() == [] and q.answers == ["Schon beantwortet"]
 
@@ -141,7 +97,7 @@ def test_a_failing_comment_after_a_button_is_only_logged(db, caplog):
     bot = make_bot(db)
     bot.llm = NoComment()
     sid = db.add_suggestion(Candidate(media_type="movie", source="new", title="Part 3", year=2000, tmdb_id=3))
-    q = Query()
+    q = FakeQuery()
     q.data = f"req:{sid}"
     with caplog.at_level(logging.WARNING):
         run(bot.on_callback(type("Upd", (), {"callback_query": q})(), None))

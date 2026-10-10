@@ -1,15 +1,12 @@
+"""Languages: the bot answers in the language it is addressed in; fixed texts are translated once."""
 import asyncio
 
 from corsarr import i18n
-from corsarr.bot import CorsarrBot
 from corsarr.db import now
 from corsarr.llm import FeedbackIntent, SettingsChange, Understanding
 from corsarr.models import Candidate
 from corsarr.translate import Translations
-
-
-def run(coro):
-    return asyncio.run(coro)
+from helpers import FakeMessage, FakeQuery, make_bot as plain_bot, run
 
 
 class FakeLLM:
@@ -36,37 +33,9 @@ class FakeLLM:
         return out
 
 
-class FakeTelegram:
-    def __init__(self):
-        self.sent = []
-
-    async def send_message(self, chat_id, text, **kwargs):
-        self.sent.append(text)
-        return type("M", (), {"message_id": 1})()
-
-    async def send_chat_action(self, *args):
-        pass
-
-
-class FakeMessage:
-    reply_to_message = None
-    from_user = type("U", (), {"first_name": "Sam"})()
-
-    def __init__(self):
-        self.replies = []
-
-    async def reply_text(self, text, **kwargs):
-        self.replies.append(text)
-
-
 def make_bot(db, language):
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.llm, bot.down, bot.genres_loaded = db, FakeLLM(language), False, True
-    bot.cfg = type("Cfg", (), {"chat_id": -100})()
-    bot.app = type("App", (), {"bot": FakeTelegram()})()
-    bot.speaker = lambda: "normal"
+    bot = plain_bot(db, llm=FakeLLM(language))
     bot.translations = Translations(db, bot.llm)
-    bot._card_locks, bot._nav_wanted = {}, {}  # set up by __init__, which the test skips
     return bot
 
 
@@ -117,7 +86,7 @@ def test_unprompted_messages_use_the_groups_last_language(db):
     rid = db.add_request("season", "tv:1", "s1", "Andor (2022)", "tv", now(), status="pending",
                          extra={"season": 1, "series_done": False})
     assert run(bot.ask_feedback(db.request(rid)))
-    assert bot.app.bot.sent[0].startswith("📺 <b>Andor (2022)</b> · season 1")
+    assert bot.app.bot.messages[0][0].startswith("📺 <b>Andor (2022)</b> · season 1")
 
 
 def test_logs_are_english_whatever_the_language():
@@ -141,8 +110,7 @@ def test_parallel_requests_keep_their_own_language():
 
 
 def test_a_card_stays_in_its_language(db):
-    from test_carousel import make_bot as carousel_bot, FakeQuery
-    bot = carousel_bot(db)
+    bot = plain_bot(db)
     lib = Candidate(media_type="movie", source="library", title="Heat", year=1995, jellyfin_id="jf", tmdb_id=9,
                     overview="Cops and robbers.")
     new = Candidate(media_type="movie", source="new", title="Ronin", year=1998, tmdb_id=8, overview="Heist.")

@@ -7,14 +7,42 @@ Wants=network-online.target
 Type=simple
 User=corsarr
 WorkingDirectory=/opt/corsarr
-Environment=DATA_DIR=/var/lib/corsarr PYTHONUNBUFFERED=1
-# Lets the web interface request updates (see corsarr-update.path) and compare against this branch
+Environment=DATA_DIR=/var/lib/corsarr PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+# Lets the web interface request updates (see corsarr-update.path) and compare against this branch.
+# The update log is written by the root update service; the app only reads it.
 Environment=CORSARR_UPDATE_TRIGGER=/var/lib/corsarr/update-requested CORSARR_BRANCH=main
+Environment=CORSARR_UPDATE_LOG=/var/log/corsarr/update.log
 # Optional ("-"): everything else can be set in the web interface instead.
 EnvironmentFile=-/etc/corsarr.env
 ExecStart=/opt/corsarr/.venv/bin/python -m corsarr
 Restart=always
 RestartSec=10
+
+# Sandbox: the app may only write to its data directory (database, logs, config.json, the update
+# request file); the code in /opt/corsarr and the rest of the system are read-only, /home, /tmp and
+# the kernel interfaces are hidden, and it runs without capabilities or new privileges.
+# The mount-based options (ProtectSystem, ProtectHome, PrivateTmp, PrivateDevices, ProtectKernel*,
+# ProtectControlGroups) need mount namespaces, which an unprivileged LXC container only has with the
+# "nesting" feature (deploy/proxmox.sh enables it; without it the service fails with "Failed to set up
+# mount namespacing"). ProtectProc/ProcSubset are left out on purpose: they remount /proc, which fails
+# in LXC containers. MemoryDenyWriteExecute is left out: it breaks pydantic-core/cryptography.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/corsarr
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

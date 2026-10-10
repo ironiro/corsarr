@@ -135,6 +135,15 @@ CREATE TABLE IF NOT EXISTS watch_state (
 );
 """
 
+# Indexes on columns that _migrate adds – created after it, so they also work on databases from older
+# versions. IF NOT EXISTS: no schema version bump needed.
+INDEXES = """
+CREATE INDEX IF NOT EXISTS ix_suggestions_carousel ON suggestions(carousel_id);
+CREATE INDEX IF NOT EXISTS ix_suggestions_requested ON suggestions(media_type, tmdb_id, status);
+CREATE INDEX IF NOT EXISTS ix_fr_message ON feedback_requests(message_id);
+CREATE INDEX IF NOT EXISTS ix_arr_episode ON arr_imports(group_key, season, episode, created_at);
+"""
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
@@ -172,6 +181,7 @@ class DB:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self._migrate()
+        self.conn.executescript(INDEXES)
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
@@ -523,3 +533,37 @@ class DB:
             "SELECT * FROM watch_state WHERE media_type='tv' AND finished=0"
         )
         return [dict(r) for r in rows]
+
+    # --- retention (see retention.py) ----------------------------------------
+    def prune_usage(self, before: datetime) -> int:
+        return self._exec("DELETE FROM llm_usage WHERE ts < ?", (iso(before),)).rowcount
+
+    def prune_imports(self, before: datetime) -> int:
+        """Notified imports older than `before`; pending ones stay until their message went out."""
+        return self._exec("DELETE FROM arr_imports WHERE notified=1 AND created_at < ?", (iso(before),)).rowcount
+
+    def prune_cards(self, before: datetime) -> dict[str, int]:
+        """Carousels, collections and suggestions older than `before`. Requested suggestions are kept
+        (was_requested), only their card JSON and poster file id go."""
+        cutoff = iso(before)
+        carousels = self._exec("DELETE FROM carousels WHERE created_at < ?", (cutoff,)).rowcount
+        collections = self._exec("DELETE FROM collections WHERE created_at < ?", (cutoff,)).rowcount
+        suggestions = self._exec(
+            "DELETE FROM suggestions WHERE created_at < ? AND status != 'requested'", (cutoff,)).rowcount
+        self._exec("UPDATE suggestions SET card=NULL, file_id=NULL WHERE created_at < ? AND card IS NOT NULL",
+                   (cutoff,))
+        return {"carousels": carousels, "collections": collections, "suggestions": suggestions}
+
+    def prune_translations(self, valid_keys: set[str]) -> int:
+        """Stored translations of texts that no longer exist."""
+        stale = [r["key"] for r in self.conn.execute("SELECT DISTINCT key FROM translations")
+                 if r["key"] not in valid_keys]
+        if not stale:
+            return 0
+        marks = ",".join("?" * len(stale))
+        return self._exec(f"DELETE FROM translations WHERE key IN ({marks})", tuple(stale)).rowcount
+
+    def optimize(self) -> None:
+        """Let SQLite refresh its statistics after the deletions (cheap; no VACUUM on a live database)."""
+        self.conn.execute("PRAGMA optimize")
+        self.conn.commit()

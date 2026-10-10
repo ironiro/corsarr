@@ -16,6 +16,16 @@ let lastEventId = 0;
 let eventsBoot = null;  // changes when the program restarted: its ids start anew
 let timers = [];
 
+// --- timing (ms) ----------------------------------------------------------------
+const STATUS_INTERVAL = 10000;        // status refresh (bot state, services)
+const EVENTS_INTERVAL = 3000;         // event log polling
+const UPDATE_WATCH_INTERVAL = 4000;   // polling while an update runs
+const HOOKS_INTERVAL = 5000;          // setup assistant: webhook arrival check
+const SAVED_MARK_MS = 2500;           // "✓ saved" next to a behaviour setting
+const COPIED_MARK_MS = 1500;          // "copied" label on a copy button
+const RESTORE_RELOAD_DELAY = 2000;    // time to read the restore result before the page reloads
+const DOWNLOAD_URL_TTL = 10000;       // object URL of a backup download stays valid this long
+
 // --- helpers -------------------------------------------------------------------
 function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
@@ -39,14 +49,17 @@ function tr(key, vars) {
   return s;
 }
 
-async function api(path, options = {}) {
+// A plain object body is sent as JSON, a FormData body as it is (file upload). With `raw` the Response
+// itself comes back instead of the parsed JSON (downloads); errors are JSON either way.
+async function api(path, { raw, ...options } = {}) {
   const opts = { ...options, headers: { "X-Corsarr": "1", ...(options.headers || {}) } };
-  if (opts.body && typeof opts.body !== "string") {
+  if (opts.body && typeof opts.body !== "string" && !(opts.body instanceof FormData)) {
     opts.body = JSON.stringify(opts.body);
     opts.headers["Content-Type"] = "application/json";
   }
   const res = await fetch(path, opts);
   if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  if (raw && res.ok) return res;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { const e = new Error(data.error || res.statusText); e.data = data; throw e; }
   return data;
@@ -68,9 +81,9 @@ function clock(ts) {
 function clearTimers() { timers.forEach(clearInterval); timers = []; }
 
 // --- skins: one DOM, the look comes from style.css scoped by <html data-skin="…"> ---------------
-// index.html applies the stored skin before the first paint; this only switches and remembers it.
-const SKINS = ["arr", "terminal", "vhs", "soft"];
-const DEFAULT_SKIN = "vhs";  // also in index.html
+// index.html applies the stored skin before the first paint and defines the list; this only switches and remembers it.
+const SKINS = window.CORSARR_SKINS;
+const DEFAULT_SKIN = window.CORSARR_DEFAULT_SKIN;
 const currentSkin = () => document.documentElement.dataset.skin;
 
 function setSkin(name) {
@@ -137,7 +150,7 @@ function showApp() {
   document.getElementById("app").replaceChildren(header, pagebar, main, footer());
   ({ status: viewStatus, events: viewEvents, config: viewConfig, setup: viewSetup, backup: viewBackup })[tab](main);
   refreshStatus();
-  timers.push(setInterval(refreshStatus, 10000));
+  timers.push(setInterval(refreshStatus, STATUS_INTERVAL));
 }
 
 // Footer like on open source apps: name and running version, links to the project, the licence.
@@ -233,8 +246,8 @@ function renderStatus() {
       h("dt", {}, T.data_dir), h("dd", {}, s.data_dir),
       h("dt", {}, T.log_file), h("dd", {}, s.log_file)));
 
-  // One row per service: a table in the *arr and terminal skins, cards (cassettes, tiles) in the others.
-  const names = ["telegram", "llm", "jellyfin", "jellyseerr", "webhook", "sonarr", "radarr"];
+  // One row per service, in the server's order: a table in the *arr and terminal skins, cards (cassettes, tiles) in the others.
+  const names = Object.keys(s.services);
   const head = h("div", { class: "service head", "aria-hidden": "true" }, h("div", { class: "name" }, T.col_service),
     h("div", { class: "state" }, T.col_status), h("div", { class: "detail" }, T.col_detail), h("div", { class: "meta" }, T.col_checked));
   const services = h("div", { class: "services" }, head,
@@ -407,7 +420,7 @@ function watchUpdate() {
       updateTimer = null;
       location.reload();  // the update may have changed the interface itself
     }
-  }, 4000);
+  }, UPDATE_WATCH_INTERVAL);
 }
 
 async function run(btn, busyLabel, path) {
@@ -442,7 +455,7 @@ function viewEvents(main) {
     h("p", { class: "hint", style: "margin-top:8px" }, T.events_hint));
   renderEvents();
   pollEvents();
-  timers.push(setInterval(pollEvents, 3000));
+  timers.push(setInterval(pollEvents, EVENTS_INTERVAL));
 }
 
 async function pollEvents() {
@@ -479,6 +492,7 @@ function renderEvents() {
 }
 
 // --- config tab ---------------------------------------------------------------------------
+// Display order of the sections – not taken from the fields, whose order has "advanced" before "webhooks".
 const GROUPS = ["telegram", "llm", "costs", "jellyfin", "jellyseerr", "webhooks", "interface", "advanced"];
 const openGroups = new Set();  // sections the user opened; those with errors open by themselves
 
@@ -504,13 +518,22 @@ function loadError(retry) {
     h("button", { class: "btn small", onclick: retry }, T.retry));
 }
 
-// --- language model provider: the selected one decides which fields are shown and used ----------------
+// --- field values: what the form holds right now ---------------------------------------------------
+const field = name => configData.fields.find(f => f.name === name) || {};
+// Config tab: the value typed in (dirty), else the saved one – or the default after a reset.
 function fieldValue(name) {
   if (name in dirty) return dirty[name];
-  const f = configData.fields.find(f => f.name === name);
-  return f && !resets.has(name) ? f.value || f.default : (f ? f.default : "");
+  const f = field(name);
+  return (resets.has(name) ? f.default : f.value || f.default) || "";
 }
-const providerId = () => fieldValue("LLM_PROVIDER") || "claude";
+// Setup assistant: the value typed in this session, else the saved one (secrets are never sent to the
+// browser: empty = keep).
+const wizValue = name => name in wiz.values ? wiz.values[name] : (field(name).secret ? "" : field(name).value || "");
+
+// --- language model provider: the selected one decides which fields are shown and used ----------------
+// `get` is the form's value getter (fieldValue on the config tab, wizValue in the setup assistant).
+const currentProvider = get => get("LLM_PROVIDER") || "claude";
+const providerFields = get => providerInfo(currentProvider(get)).fields;
 const providerInfo = id => (configData.providers || []).find(p => p.id === id) || { id, name: id, fields: {} };
 
 function providerNotice(id) {
@@ -525,32 +548,43 @@ const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersE
                streaming: null, streamingError: "" };
 let savedSetting = null;  // behaviour setting that was just saved – shows "✓ saved" next to it
 
-async function loadOptions(which) {
-  let body, provider;
+// Asks the server for "models", "users" or "streaming" with the form's values: `typed(name)` is what was
+// typed in and not saved yet (the saved key only goes to the saved address), `value(name)` the typed
+// value, else the saved one. Resolves to the response plus `data`: the list (for streaming the whole
+// response with regions and providers), or null when it is empty – the form then shows a text field.
+async function loadPicker(which, typed, value) {
+  let path, body;
   if (which === "models") {
-    provider = providerId();
+    const provider = currentProvider(value);
     const pf = providerInfo(provider).fields;
-    body = { provider, api_key: (pf.key && dirty[pf.key]) || "", url: (pf.url && dirty[pf.url]) || "" };
+    path = "models";
+    body = { provider, api_key: (pf.key && typed(pf.key)) || "", url: (pf.url && typed(pf.url)) || "" };
   } else if (which === "streaming") {
-    body = { url: dirty.JELLYSEERR_URL || "", api_key: dirty.JELLYSEERR_API_KEY || "", region: fieldValue("STREAMING_REGION") };
+    path = "streaming";
+    body = { url: typed("JELLYSEERR_URL") || "", api_key: typed("JELLYSEERR_API_KEY") || "", region: value("STREAMING_REGION") };
   } else {
-    body = { url: dirty.JELLYFIN_URL || "", api_key: dirty.JELLYFIN_API_KEY || "" };
+    path = "jellyfin-users";
+    body = { url: typed("JELLYFIN_URL") || "", api_key: typed("JELLYFIN_API_KEY") || "" };
   }
-  const path = { models: "models", users: "jellyfin-users", streaming: "streaming" }[which];
+  const res = await api(`/api/options/${path}`, { method: "POST", body });
+  const list = which === "streaming" ? res.regions : res[which];
+  return { ...res, data: list && list.length ? (which === "streaming" ? res : list) : null, error: res.error || "" };
+}
+
+// Config tab: typed values are the unsaved changes.
+async function loadOptions(which) {
+  const typed = name => dirty[name];
+  const provider = currentProvider(fieldValue);
+  let res;
   try {
-    const res = await api(`/api/options/${path}`, { method: "POST", body });
-    if (which === "models" && provider !== providerId()) return;  // provider changed meanwhile
-    if (which === "streaming") {
-      if (res.region !== fieldValue("STREAMING_REGION").toUpperCase()) return;  // country changed meanwhile
-      opts.streaming = res.regions && res.regions.length ? res : null;
-    } else {
-      opts[which] = res[which] && res[which].length ? res[which] : null;
-    }
-    opts[which + "Error"] = res.error || "";
+    res = await loadPicker(which, typed, fieldValue);
+    if (which === "models" && provider !== currentProvider(fieldValue)) return;  // provider changed meanwhile
+    if (which === "streaming" && res.region !== fieldValue("STREAMING_REGION").toUpperCase()) return;  // country changed meanwhile
   } catch (e) {
-    opts[which] = null;
-    opts[which + "Error"] = e.message;
+    res = { data: null, error: e.message };
   }
+  opts[which] = res.data;
+  opts[which + "Error"] = res.error;
   if (which === "models") opts.modelsFor = provider;
   renderConfig();
 }
@@ -616,7 +650,7 @@ function pickerInput(f, id, current, onInput) {
       onInput(e); opts.models = null; opts.modelsError = ""; renderConfig(); loadOptions("models");
     } }, options);
   }
-  if (f.name === providerInfo(providerId()).fields.model && opts.models && opts.modelsFor === providerId()) {
+  if (f.name === providerFields(fieldValue).model && opts.models && opts.modelsFor === currentProvider(fieldValue)) {
     const ids = opts.models.map(m => m.id);
     const label = m => !m.cost ? m.name
       : m.recommended ? tr("model_option_recommended", { name: m.name, cost: fmtUsd(m.cost.per_suggestion) })
@@ -679,7 +713,7 @@ function renderConfig(message) {
   // One collapsible section per group; closed it shows a one-line summary and whether something is missing.
   const groups = GROUPS.map(g => {
     // Fields of providers that are not selected stay hidden (and are not used).
-    const fields = configData.fields.filter(f => f.group === g && (!f.provider || f.provider === providerId()));
+    const fields = configData.fields.filter(f => f.group === g && (!f.provider || f.provider === currentProvider(fieldValue)));
     const missing = fields.filter(f => f.error && !(f.name in dirty)).length;
     const changed = fields.some(f => f.name in dirty || resets.has(f.name));
     const state = missing ? h("span", { class: "pill error" }, missing === 1 ? T.group_missing_one : tr("group_missing", { n: missing }))
@@ -716,7 +750,7 @@ function groupSummary(g, fields) {
             fields.find(f => f.name === "ADMIN_PASSWORD")?.is_set ? T.password_set : T.password_none].join(" · ");
   }
   if (g === "webhooks") return shown("WEBHOOK_SECRET") ? T.secret_is_set : "";
-  const names = { telegram: ["TELEGRAM_CHAT_ID"], llm: ["LLM_PROVIDER", providerInfo(providerId()).fields.model],
+  const names = { telegram: ["TELEGRAM_CHAT_ID"], llm: ["LLM_PROVIDER", providerFields(fieldValue).model],
                   jellyfin: ["JELLYFIN_URL", "JELLYFIN_USER"], jellyseerr: ["JELLYSEERR_URL", "STREAMING_PROVIDERS"],
                   advanced: ["WEBHOOK_HOST", "WEBHOOK_PORT", "LOG_LEVEL"] }[g] || [];
   if (g === "costs") {
@@ -758,7 +792,7 @@ function fieldRow(f) {
     updateSaveBar();
   };
   // The pickers depend on these – reload them once a new address or key has been typed.
-  const pf = providerInfo(providerId()).fields;
+  const pf = providerFields(fieldValue);
   const reloads = f.name === pf.key || f.name === pf.url ? "models"
     : { JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users", JELLYSEERR_URL: "streaming", JELLYSEERR_API_KEY: "streaming",
         STREAMING_REGION: "streaming" }[f.name];
@@ -806,7 +840,7 @@ async function saveSetting(key, value) {
     configData = await api("/api/settings", { method: "PUT", body: { [key]: value } });
     savedSetting = key;
     renderConfig();
-    setTimeout(() => { if (savedSetting === key) { savedSetting = null; renderConfig(); } }, 2500);
+    setTimeout(() => { if (savedSetting === key) { savedSetting = null; renderConfig(); } }, SAVED_MARK_MS);
   } catch (e) {
     renderConfig(h("span", { class: "pill error" }, T.save_failed + ": " + Object.values(e.data?.errors || {}).join(", ")));
   }
@@ -815,7 +849,7 @@ async function saveSetting(key, value) {
 async function saveConfig(btn) {
   const p = dirty.LLM_PROVIDER && providerInfo(dirty.LLM_PROVIDER);
   if (p && !p.recommended && !confirm(tr("provider_confirm", { name: p.name }))) return;
-  const m = providerId() === "claude" && dirty.CLAUDE_MODEL && modelInfo(dirty.CLAUDE_MODEL);
+  const m = currentProvider(fieldValue) === "claude" && dirty.CLAUDE_MODEL && modelInfo(dirty.CLAUDE_MODEL);
   if (m && m.cost && !m.recommended && !confirm(tr("model_confirm", { name: m.name, factor: m.cost.factor, cost: fmtUsd(m.cost.per_suggestion) }))) {
     return;
   }
@@ -861,10 +895,6 @@ async function viewSetup(main) {
   renderSetup();
 }
 
-const field = name => configData.fields.find(f => f.name === name) || {};
-// Value typed in this session, else the saved one (secrets are never sent to the browser: empty = keep).
-const wizValue = name => name in wiz.values ? wiz.values[name] : (field(name).secret ? "" : field(name).value || "");
-
 function wizInput(name, { placeholder, onchange } = {}) {
   const f = field(name);
   return h("div", { class: "field" },
@@ -892,7 +922,7 @@ function wizSelect(name, options, onchange) {
 // Copy also works over plain http on the home network, where navigator.clipboard is not available.
 function copyButton(text) {
   return h("button", { class: "btn small", onclick: e => {
-    const done = () => { e.target.textContent = T.wiz_copied; setTimeout(() => { e.target.textContent = T.wiz_copy; }, 1500); };
+    const done = () => { e.target.textContent = T.wiz_copied; setTimeout(() => { e.target.textContent = T.wiz_copy; }, COPIED_MARK_MS); };
     if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done); return; }
     const area = h("textarea", { style: "position:fixed;opacity:0" }, text);
     document.body.append(area); area.select();
@@ -903,10 +933,11 @@ function copyButton(text) {
 const copyRow = (label, text) => h("div", { class: "copyrow" }, h("span", { class: "muted" }, label),
   h("code", {}, text), copyButton(text));
 
-async function wizCall(path, body) {
+// Runs a request with the assistant marked busy (buttons disabled); an error ends up in wiz.error, null comes back.
+async function wizBusy(call) {
   wiz.busy = true; wiz.error = ""; renderSetup();
   try {
-    return await api(path, { method: "POST", body });
+    return await call();
   } catch (e) {
     wiz.error = e.message;
     return null;
@@ -914,6 +945,7 @@ async function wizCall(path, body) {
     wiz.busy = false; renderSetup();
   }
 }
+const wizCall = (path, body) => wizBusy(() => api(path, { method: "POST", body }));
 
 // Save the values of the current step (the bot restarts with them) and go on.
 async function wizSave(names) {
@@ -939,7 +971,7 @@ function wizGo(step) {
   clearInterval(wizTimer); wizTimer = null;
   if (WIZ_STEPS[step] === "webhooks") {
     loadHooks();
-    wizTimer = setInterval(loadHooks, 5000);  // turns green as soon as the first event arrives
+    wizTimer = setInterval(loadHooks, HOOKS_INTERVAL);  // turns green as soon as the first event arrives
     timers.push(wizTimer);
   }
   if (WIZ_STEPS[step] === "llm" && !wiz.models) loadWizModels();
@@ -951,23 +983,18 @@ async function loadHooks() {
   if (WIZ_STEPS[wiz.step] === "webhooks") renderSetup();
 }
 
-const provider = () => wizValue("LLM_PROVIDER") || "claude";
-const providerFields = () => providerInfo(provider()).fields || {};
+// The assistant's pickers (see loadPicker): typed values are the ones from this session.
+const wizTyped = name => wiz.values[name];
 
 async function loadWizModels() {
-  const pf = providerFields();
-  const res = await api("/api/options/models", { method: "POST", body: {
-    provider: provider(), api_key: (pf.key && wiz.values[pf.key]) || "", url: (pf.url && wiz.values[pf.url]) || "" } })
-    .catch(e => ({ models: [], error: e.message }));
-  wiz.models = res.models && res.models.length ? res.models : null;
+  const res = await loadPicker("models", wizTyped, wizValue).catch(() => ({ data: null }));
+  wiz.models = res.data;  // no key yet or a wrong one: a text field, no message
   renderSetup();
 }
 
 async function loadWizUsers() {
-  const res = await api("/api/options/jellyfin-users", { method: "POST", body: {
-    url: wiz.values.JELLYFIN_URL || "", api_key: wiz.values.JELLYFIN_API_KEY || "" } })
-    .catch(e => ({ users: [], error: e.message }));
-  wiz.users = res.users && res.users.length ? res.users : null;
+  const res = await loadPicker("users", wizTyped, wizValue).catch(e => ({ data: null, error: e.message }));
+  wiz.users = res.data;
   if (res.error) wiz.error = tr("options_fallback", { error: res.error });
   renderSetup();
 }
@@ -1004,20 +1031,20 @@ function stepTelegram() {
 }
 
 function stepLlm() {
-  const pf = providerFields();
+  const pf = providerFields(wizValue);
   const reload = () => { wiz.models = null; loadWizModels(); };
   const body = [h("p", {}, T.wiz_llm_intro),
     wizSelect("LLM_PROVIDER", (configData.providers || []).map(p =>
       [p.id, tr(p.recommended ? "provider_recommended" : "provider_untested", { name: p.name })]), () => { wiz.values[pf.model] = undefined; reload(); }),
-    providerNotice(provider())];
+    providerNotice(currentProvider(wizValue))];
   if (pf.key) body.push(wizInput(pf.key, { onchange: reload }));
   if (pf.url) body.push(wizInput(pf.url, { onchange: reload }));
-  const fresh = providerFields();
+  const fresh = providerFields(wizValue);
   body.push(wiz.models
     ? wizSelect(fresh.model, wiz.models.map(m => [m.id, m.cost && m.recommended ? tr("model_option_recommended",
         { name: m.name, cost: fmtUsd(m.cost.per_suggestion) }) : m.name]))
     : wizInput(fresh.model));
-  if (provider() === "claude") body.push(h("p", { class: "hint" }, T.wiz_llm_cost));
+  if (currentProvider(wizValue) === "claude") body.push(h("p", { class: "hint" }, T.wiz_llm_cost));
   const names = ["LLM_PROVIDER", fresh.key, fresh.url, fresh.model].filter(Boolean);
   body.push(h("button", { class: "btn", disabled: wiz.busy, onclick: () => wizTest("llm", names) }, T.wiz_test));
   return { body, ready: !!wiz.result.llm, ok: wiz.result.llm, save: names };
@@ -1035,10 +1062,9 @@ function stepJellyfin() {
 
 // Optional part of the Seerr step: the streaming services they subscribe to (see providerChecklist).
 async function loadWizStreaming() {
-  const res = await wizCall("/api/options/streaming", {
-    url: wiz.values.JELLYSEERR_URL || "", api_key: wiz.values.JELLYSEERR_API_KEY || "", region: wizValue("STREAMING_REGION") });
+  const res = await wizBusy(() => loadPicker("streaming", wizTyped, wizValue));
   if (!res) return;
-  wiz.streaming = res.regions && res.regions.length ? res : null;
+  wiz.streaming = res.data;
   if (res.error) wiz.error = tr("options_fallback", { error: res.error });
   renderSetup();
 }
@@ -1126,12 +1152,9 @@ function restoreForm(onDone) {
     form.append("file", file.files[0]);
     form.append("password", pw.value);
     try {
-      const res = await fetch("/api/restore", { method: "POST", headers: { "X-Corsarr": "1" }, body: form });
-      if (res.status === 401) { showLogin(); return; }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || res.statusText);
+      const data = await api("/api/restore", { method: "POST", body: form });
       msg.replaceChildren(h("div", { class: "notice ok" }, tr("restore_done", { version: data.version || "?", created: (data.created || "").slice(0, 16).replace("T", " ") })));
-      setTimeout(onDone, 2000);
+      setTimeout(onDone, RESTORE_RELOAD_DELAY);
     } catch (e) {
       msg.replaceChildren(h("div", { class: "notice error" }, e.message));
     } finally {
@@ -1183,9 +1206,7 @@ function renderSetup() {
 
 // --- backup tab ------------------------------------------------------------------------------
 // Credentials a backup holds: every secret that is set, plus the webhook secret (see backup.create).
-const CREDENTIALS = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-                     "JELLYFIN_API_KEY", "JELLYSEERR_API_KEY", "SONARR_API_KEY", "RADARR_API_KEY",
-                     "WEBHOOK_SECRET", "ADMIN_PASSWORD"];
+const isCredential = f => f.secret || f.name === "WEBHOOK_SECRET";
 
 async function viewBackup(main) {
   try {
@@ -1194,7 +1215,7 @@ async function viewBackup(main) {
     if (e.message !== "unauthorized") renderNetworkError();
     return;
   }
-  const included = CREDENTIALS.filter(n => configData.fields.find(f => f.name === n)?.is_set).map(n => T["cred_" + n]);
+  const included = configData.fields.filter(f => isCredential(f) && f.is_set).map(f => T["cred_" + f.name]);
   const contents = h("ul", { class: "hint" },
     h("li", {}, included.length ? tr("backup_contains", { list: included.join(", ") }) : T.backup_contains_none),
     h("li", {}, T.backup_not_contained));
@@ -1205,15 +1226,12 @@ async function viewBackup(main) {
     if (pw.value !== pw2.value) { msg.replaceChildren(h("div", { class: "notice error" }, T.backup_pw_mismatch)); return; }
     download.disabled = true; download.textContent = T.backup_downloading;
     try {
-      const res = await fetch("/api/backup", { method: "POST", body: JSON.stringify({ password: pw.value }),
-        headers: { "X-Corsarr": "1", "Content-Type": "application/json" } });
-      if (res.status === 401) { showLogin(); return; }
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+      const res = await api("/api/backup", { method: "POST", body: { password: pw.value }, raw: true });
       const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || "corsarr-backup.zip";
       const url = URL.createObjectURL(await res.blob());
       const a = h("a", { href: url, download: name });
       document.body.append(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_TTL);
       msg.replaceChildren(h("div", { class: "notice ok" }, T.backup_done));
       pw.value = pw2.value = "";
     } catch (e) {

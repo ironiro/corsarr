@@ -1,3 +1,4 @@
+"""Sonarr/Radarr download notifications: bundling, the webhook, and catching up missed imports."""
 import asyncio
 import json
 from datetime import timedelta
@@ -8,21 +9,7 @@ from corsarr import arr, web
 from corsarr.db import iso, now
 from corsarr.models import Candidate
 from corsarr.monitor import health
-
-
-def episodes(seasons, per_season, aired):
-    return [{"seasonNumber": s, "episodeNumber": e, "title": f"Folge {e}", "airDateUtc": aired}
-            for s in seasons for e in range(1, per_season + 1)]
-
-
-def sonarr(eps, upgrade=False, series_id=7, title="Grey's Anatomy", year=2005, tmdb=1416):
-    return {"eventType": "Download", "isUpgrade": upgrade, "episodes": eps,
-            "series": {"id": series_id, "title": title, "year": year, "tmdbId": tmdb}}
-
-
-def age_imports(db, minutes):
-    db.conn.execute("UPDATE arr_imports SET created_at=?", (iso(now() - timedelta(minutes=minutes)),))
-    db.conn.commit()
+from helpers import age_imports, episodes, sonarr
 
 
 def test_backfill_becomes_one_message_after_it_settles(db):
@@ -92,7 +79,6 @@ def test_sonarr_webhook_needs_secret_and_stores(db, tmp_path, monkeypatch):
 
     asyncio.run(go())
     assert len(db.pending_imports()) == 2 and health.services["sonarr"].status == "ok"
-    health.reset()
 
 
 # --- catching up imports whose webhook never arrived --------------------------------------------

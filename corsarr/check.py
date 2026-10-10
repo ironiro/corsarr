@@ -11,17 +11,16 @@ from . import config
 from .config import PROVIDER_NAMES
 from .checks import run_checks
 
-LABELS = {"jellyfin": "Jellyfin", "jellyseerr": "Jellyseerr", "telegram": "Telegram"}
-
 
 def main() -> None:
     cfg = config.load()
     for err in cfg.errors.values():
         print(f"⚠️  {err}")
-    LABELS["llm"] = PROVIDER_NAMES.get(cfg.llm_provider, cfg.llm_provider)
+    labels = {"jellyfin": "Jellyfin", "jellyseerr": "Jellyseerr", "telegram": "Telegram",
+              "llm": PROVIDER_NAMES.get(cfg.llm_provider, cfg.llm_provider)}
     results = asyncio.run(run_checks(cfg, ping=True, send_tests=True))
     for name, (ok, detail) in results.items():
-        print(f"{'✅' if ok else '❌'} {LABELS[name]}: {detail}")
+        print(f"{'✅' if ok else '❌'} {labels[name]}: {detail}")
     raise SystemExit(0 if all(ok for ok, _ in results.values()) and cfg.complete else 1)
 
 

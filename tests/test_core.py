@@ -1,21 +1,16 @@
-import asyncio
+"""Core behaviour: characters, settings, taste profile, recommendations, feedback questions and buttons."""
 from datetime import timedelta
 
 import pytest
 
 from corsarr import persona
 from corsarr.db import iso, now
-from corsarr.feedback import FeedbackService
 from corsarr.llm import FeedbackIntent, Pick, Selection, SettingsChange, Understanding
 from corsarr.models import Candidate
 from corsarr.profile import ProfileBuilder, build_profile
 from corsarr.recommender import Recommender
-
-TICKS_MIN = 600_000_000
-
-
-def run(coro):
-    return asyncio.run(coro)
+from helpers import (TICKS_MIN, FakeJellyfin, FakeLLM, FakeMessage, FakeQuery, FakeSeerr, SayLLM, make_bot, make_feedback,
+                     movie_item, run)
 
 
 def cand(n, source="library", genres=("Thriller",), keywords=(), rating=7.0, media_type="movie"):
@@ -29,57 +24,6 @@ def understanding(intent="recommend", media_types=("movie",)):
     return Understanding(intent=intent, media_types=list(media_types), jellyfin_genres=["Thriller"],
                          tmdb_movie_genre_ids=[53], tmdb_tv_genre_ids=[],
                          settings=SettingsChange(), feedback=FeedbackIntent(rating="none", text=""))
-
-
-class FakeJellyfin:
-    def __init__(self, library=(), items=None, season=None):
-        self.library = list(library)
-        self._items = items or {}
-        self.season = season or []
-
-    async def unwatched_candidates(self, genres, media_types):
-        return [c for c in self.library if c.media_type in media_types]
-
-    async def taste_items(self):
-        return [{"Genres": ["Thriller"]}, {"Genres": ["Horror"], "_favorite": True}]
-
-    async def item(self, item_id):
-        return self._items.get(item_id)
-
-    async def season_episodes(self, series_id, season_id):
-        return self.season
-
-    async def series_finished(self, series_id):
-        return False
-
-
-class FakeSeerr:
-    def __init__(self, new=()):
-        self.new = list(new)
-
-    async def discover(self, media_type, genre_ids, exclude, want=15, max_pages=3):
-        return [c for c in self.new if c.media_type == media_type and c.key not in exclude]
-
-    async def enrich(self, cands):
-        pass
-
-    async def keywords_for(self, media_type, tmdb_id):
-        return ["Horror"], ["gore", "slasher"]
-
-
-class FakeLLM:
-    def __init__(self, pick_ids):
-        self.pick_ids = pick_ids
-        self.seen = None
-        self.taste = None
-
-    def requested_genres(self, und):
-        return list(und.jellyfin_genres)
-
-    async def select(self, request, cands, speaker, n_min, n_max, notes, genres=None, taste=None):
-        self.seen = (cands, n_min, n_max, notes)
-        self.taste = taste
-        return Selection(intro="📱 hi", picks=[Pick(id=i, reason="📱 passt") for i in self.pick_ids])
 
 
 # --- persona -------------------------------------------------------------------
@@ -205,26 +149,6 @@ def test_new_only_skips_library(db):
 
 # --- feedback -----------------------------------------------------------------------------
 
-def movie_item(played=False, pos_min=0, runtime_min=100):
-    return {"Id": "m1", "Type": "Movie", "Name": "Film", "ProductionYear": 2021,
-            "ProviderIds": {"Tmdb": "555"}, "RunTimeTicks": runtime_min * TICKS_MIN,
-            "UserData": {"Played": played, "PlaybackPositionTicks": pos_min * TICKS_MIN}}
-
-
-def make_feedback(db, items, season=None):
-    jf = FakeJellyfin(items=items, season=season)
-    svc = FeedbackService(db, jf, FakeSeerr(), ProfileBuilder(db, jf))
-    sent = []
-
-    async def notifier(req):
-        sent.append(req)
-        db.update_request(req["id"], status="sent", sent_at=now(), message_id=len(sent))
-        return True
-
-    svc.notifier = notifier
-    return svc, sent
-
-
 def test_finished_movie_asks_immediately(db):
     svc, sent = make_feedback(db, {"m1": movie_item(played=True)})
     run(svc.on_playback_stop({"event": "PlaybackStop", "itemId": "m1"}))
@@ -290,8 +214,8 @@ def test_store_rating_uses_tmdb_keywords(db):
 # --- caption --------------------------------------------------------------------------------
 
 def test_caption_marks_source_and_fits_limit():
-    from corsarr.bot import CAPTION_LIMIT, CorsarrBot
-    fb = CorsarrBot.__new__(CorsarrBot)
+    from corsarr.cards import CAPTION_LIMIT
+    fb = make_bot(None)
     new = cand(1, source="new")
     new.overview = "Sehr langer Inhalt " * 200
     cap = fb._caption(new, "📱 passt, weil lowkey spooky")
@@ -302,37 +226,11 @@ def test_caption_marks_source_and_fits_limit():
     assert "In eurer Bibliothek · Serie" in cap and "3 Staffeln" in cap and "pro Folge" in cap
 
 
-class FakeMessage:
-    photo = None
-    text_html = "<b>T1 (2020)</b>"
-    reply_markup = None
-
-    def __init__(self):
-        self.edits = []
-
-    async def edit_text(self, text, **kwargs):
-        self.edits.append((text, kwargs.get("reply_markup")))
-
-
-class FakeQuery:
-    def __init__(self, data):
-        self.data = data
-        self.message = FakeMessage()
-        self.message.chat_id = -100
-        self.from_user = type("U", (), {"first_name": "Sam"})()
-        self.answers = []
-
-    async def answer(self, text=None, **kwargs):
-        self.answers.append(text)
-
-
 def test_accept_button_marks_card_once(db):
-    from corsarr.bot import CorsarrBot
-    fb = CorsarrBot.__new__(CorsarrBot)
-    fb.db = db
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    fb = make_bot(db)
     sid = db.add_suggestion(cand(1))
-    q = FakeQuery(f"acc:{sid}")
+    q = FakeQuery(f"acc:{sid}", message=FakeMessage(text_html="<b>T1 (2020)</b>"))
     trailer = InlineKeyboardButton("🎬 Trailer", url="https://www.youtube.com/watch?v=x")
     q.message.reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅", callback_data=f"acc:{sid}"), InlineKeyboardButton("🙅", callback_data="rej:1")],
@@ -389,26 +287,15 @@ def test_discover_sends_no_language_filter_but_a_vote_minimum():
 
 
 def test_feedback_question_always_names_the_title(db):
-    from corsarr.bot import CorsarrBot
-    sent = []
-
-    class Tg:
-        async def send_message(self, chat_id, text, **kwargs):
-            sent.append((text, kwargs))
-            return type("M", (), {"message_id": 5})()
-
-    class Llm:
+    class Llm(SayLLM):
         async def say(self, situation, speaker, facts=None):
             return "📱 und, wie war's? <3"  # the model forgot the title (and sends HTML-ish text)
 
-    fb = CorsarrBot.__new__(CorsarrBot)
-    fb.db, fb.llm, fb.down = db, Llm(), False
-    fb.cfg = type("Cfg", (), {"chat_id": -100})()
-    fb.app = type("App", (), {"bot": Tg()})()
+    fb = make_bot(db, llm=Llm())
     rid = db.add_request("season", "tv:83867", "s1", "Andor (2022)", "tv", now(), status="pending",
                          extra={"season": 1, "series_done": False})
     assert run(fb.ask_feedback(db.request(rid)))
-    text, kwargs = sent[0]
+    text, kwargs = fb.app.bot.messages[0]
     assert text.startswith("📺 <b>Andor (2022)</b> · Staffel 1\n\n")
     assert text.endswith("wie war's? &lt;3") and kwargs["parse_mode"] == "HTML"
 

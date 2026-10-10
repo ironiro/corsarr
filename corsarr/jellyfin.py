@@ -8,25 +8,33 @@ from typing import Any
 import httpx
 
 from .i18n import t
-from .models import Candidate
+from .models import Candidate, label
 from .monitor import health
 
 log = logging.getLogger(__name__)
 
 ITEM_FIELDS = "Overview,Genres,ProviderIds,Tags,ProductionYear,RunTimeTicks,CommunityRating,ChildCount,RemoteTrailers"
 TICKS_PER_MIN = 600_000_000
+STARTED_TTL = 600  # seconds the list of started series is cached
+
+
+def auth_header(api_key: str) -> dict[str, str]:
+    """How Jellyfin wants its API key – also used where no client object exists (setup checks)."""
+    return {"Authorization": f'MediaBrowser Client="Corsarr", Token="{api_key}"'}
+
+
+def item_label(item: dict) -> str:
+    """'Heat (1995)' from a Jellyfin item (Name, ProductionYear)."""
+    return label(item.get("Name"), item.get("ProductionYear"))
 
 
 class Jellyfin:
-    def __init__(self, url: str, api_key: str, user: str):
+    def __init__(self, url: str, api_key: str, user: str, track: bool = True, timeout: float = 20):
         self.url = url
         self.user = user
         self.user_id: str | None = None
-        self.http = httpx.AsyncClient(
-            base_url=url,
-            timeout=20,
-            headers={"Authorization": f'MediaBrowser Client="Corsarr", Token="{api_key}"'},
-        )
+        self.http = httpx.AsyncClient(base_url=url, timeout=timeout, headers=auth_header(api_key))
+        self.track = track  # False for the GUI's pickers, which may try addresses that were only typed in
         self._started_cache: tuple[float, list[str]] = (0.0, [])
 
     async def close(self) -> None:
@@ -37,14 +45,20 @@ class Jellyfin:
             r = await self.http.get(path, params={k: v for k, v in params.items() if v is not None})
             r.raise_for_status()
         except httpx.HTTPError as e:
-            health.track_http("jellyfin", e)
+            if self.track:
+                health.track_http("jellyfin", e)
             raise
-        health.track_http("jellyfin", None)
+        if self.track:
+            health.track_http("jellyfin", None)
         return r.json()
+
+    async def users(self) -> list[dict]:
+        """The server's accounts as Jellyfin returns them (Id, Name, …)."""
+        return await self._get("/Users")
 
     async def uid(self) -> str:
         if self.user_id is None:
-            users = await self._get("/Users")
+            users = await self.users()
             for u in users:
                 if self.user in (u["Id"], u["Name"]) or u["Name"].lower() == self.user.lower():
                     self.user_id = u["Id"]
@@ -70,9 +84,9 @@ class Jellyfin:
 
     async def started_series_ids(self) -> list[str]:
         """Series with at least one played or partly played episode, most recently watched first
-        (cached 10 min)."""
+        (cached STARTED_TTL seconds)."""
         ts, cached = self._started_cache
-        if time.monotonic() - ts < 600:
+        if time.monotonic() - ts < STARTED_TTL:
             return cached
         started: dict[str, None] = {}  # ordered set
         for flt in ("IsPlayed", "IsResumable"):

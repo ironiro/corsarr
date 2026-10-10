@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,11 +7,14 @@
   <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
   <script>
-    // Apply the chosen skin before the first paint (no flash of the default look); app.js switches it.
+    // Apply the chosen skin before the first paint (no flash of the default look); app.js switches it
+    // and reads the list from here.
+    window.CORSARR_SKINS = ["arr", "terminal", "vhs", "soft"];
+    window.CORSARR_DEFAULT_SKIN = "vhs";
     try {
       const skin = localStorage.getItem("corsarr.skin");
-      document.documentElement.dataset.skin = ["arr", "terminal", "vhs", "soft"].includes(skin) ? skin : "vhs";
-    } catch (e) { document.documentElement.dataset.skin = "vhs"; }
+      document.documentElement.dataset.skin = CORSARR_SKINS.includes(skin) ? skin : CORSARR_DEFAULT_SKIN;
+    } catch (e) { document.documentElement.dataset.skin = CORSARR_DEFAULT_SKIN; }
   </script>
 </head>
 <body>

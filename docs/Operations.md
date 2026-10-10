@@ -14,7 +14,15 @@ In the data directory:
 | `corsarr.db` | SQLite: suggestions, rejections, ratings, traits, bot behaviour, download notifications |
 | `config.json` | Settings from the web interface – **contains API keys**, readable by the owner only |
 | `logs/corsarr.log` | Log, rotated at 2 MB, 5 old files kept |
-| `backups/` | Automatic copies made before updates (`pre-update-…`) and restores (`pre-restore-…`) |
+| `backups/` | Copies of the data replaced by a restore in the web interface (`pre-restore-…`) |
+
+Outside it, on the LXC installation (owned by root, so the app cannot touch them):
+
+| Path | Contents |
+| --- | --- |
+| `/var/backups/corsarr/pre-update-<date>-<version>/` | Database and settings from before each update, the last five |
+| `/var/log/corsarr/update.log` | Output of the last update started in the web interface |
+| `/etc/corsarr.env` | Optional settings as environment variables (mode `0600`) |
 
 ## Logs
 
@@ -42,22 +50,28 @@ To restart only the Telegram part (e.g. after a network problem): web interface 
 | Channel | What you get | Docker image |
 | --- | --- | --- |
 | **Stable** (default) | Tested releases (`v1.2.0`) | `:latest` or `:stable` |
-| **Beta** | Pre-releases (`v1.3.0-beta.1`) and every stable release – new features earlier, may have bugs | `:beta` |
+| **Beta** | Pre-releases (`v1.3.0-beta.1`), plus a stable release when it is newer than every beta – new features earlier, may have bugs | `:beta` |
 | **Development** | Every commit on `main` – for developers | `:edge` |
 
 Releases are git tags `vX.Y.Z` (stable) and `vX.Y.Z-beta.N` (beta). Choose the channel under
 **Configuration → Interface and updates → Update channel**. With Docker the channel follows the image tag in
 `docker-compose.yml`; a fixed version such as `:1.2.0` never changes on its own.
 
-Before every update the installer copies the database and settings to `backups/pre-update-<date>-<version>/`
-in the data directory (the last five are kept).
+Before every update the installer copies the database and settings to
+`/var/backups/corsarr/pre-update-<date>-<version>/` (root only; the last five are kept). The update is prepared
+next to the running version – the code is fetched and a new Python environment is built first – and only then
+switched in. If the new version does not answer within 30 seconds, the installer **rolls back**: previous
+code and environment are put back, the database is restored from that copy if the new version had already
+converted it, and the previous version is started again. The installer's output (web interface → *Output of
+the last update*, or `/var/log/corsarr/update.log`) then ends with `Error: Update to … failed – rolled back`.
 
 **Going back to an older version:** if your channel's newest release is older than the running one (e.g. after
 switching from beta to stable), the web interface offers it as *Switch to … (older)* and warns first.
 Database and configuration carry format versions: if the newer version already converted the database, the
 older one refuses to start and says so in the web interface instead of damaging the data. Then either update
 to the newer version again, or stop Corsarr and copy `corsarr.db` and `config.json` back from the
-`pre-update-…` backup. Configurations from older versions are always taken over.
+`pre-update-…` backup (as the service user, e.g. `runuser -u corsarr -- cp …`, and delete `corsarr.db-wal`
+and `corsarr.db-shm` next to it). Configurations from older versions are always taken over.
 
 ### Updating
 
@@ -75,6 +89,9 @@ On the command line:
 - **LXC:** in the Proxmox host shell `pct exec <id> -- bash -c "curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/install.sh | bash"` (see [Installation](Installation.md#update)).
 - **Docker:** `docker compose pull && docker compose up -d`
 - **Manual:** `cd /opt/corsarr && git fetch --tags && git checkout v1.2.0 && .venv/bin/pip install -r requirements.txt && systemctl restart corsarr` (or `git pull` on `main` for the development version)
+
+An update started in the web interface or with `install.sh` may take a few minutes (it builds a fresh Python
+environment); it gives up after 20 minutes or when a download stalls, and leaves the running version untouched.
 
 The database is upgraded automatically on start. Settings are kept.
 

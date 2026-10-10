@@ -3,14 +3,7 @@ import logging
 
 from corsarr import config, main
 from corsarr.monitor import EventBuffer
-
-
-class Cfg:
-    def __init__(self, **values):
-        self.values = values
-
-    def get(self, name):
-        return self.values.get(name, "")
+from helpers import FakeConfig as Cfg
 
 
 def test_secret_filter_masks_token_and_keys_in_message_args_and_exceptions():

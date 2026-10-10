@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from . import backup, config, usage, web
+from . import backup, config, jobs, usage, web
 from .bot import CorsarrBot
 from .checks import run_checks
 from .db import DB, DatabaseTooNew
@@ -32,6 +32,7 @@ from .recommender import Recommender
 log = logging.getLogger("corsarr")
 
 HEALTH_INTERVAL = 300  # seconds between automatic connection checks
+LOG_FILE_BYTES, LOG_FILE_COUNT = 2_000_000, 5  # corsarr.log rotates at this size, keeping this many old files
 MIN_SECRET_LENGTH = 6  # shorter secrets are not masked: "pw" would mangle every "password" in the log
 
 
@@ -76,7 +77,7 @@ def setup_logging(cfg: config.Config) -> None:
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     root = logging.getLogger()
     root.setLevel(cfg.log_level)
-    file_handler = RotatingFileHandler(cfg.log_dir / "corsarr.log", maxBytes=2_000_000, backupCount=5,
+    file_handler = RotatingFileHandler(cfg.log_dir / "corsarr.log", maxBytes=LOG_FILE_BYTES, backupCount=LOG_FILE_COUNT,
                                        encoding="utf-8")
     console = logging.StreamHandler()
     for h in (file_handler, console):
@@ -227,11 +228,15 @@ class Runtime:
             self.corsarr.app = app
             self.corsarr.bot_id, self.corsarr.username = app.bot.id, app.bot.username
             await self.corsarr.load_genres()
-            app.job_queue.run_repeating(self.corsarr.job_feedback, interval=600, first=30)
-            app.job_queue.run_repeating(self.corsarr.job_outage, interval=300, first=300)
-            app.job_queue.run_repeating(self.corsarr.job_downloads, interval=60, first=10)
-            app.job_queue.run_repeating(self.corsarr.job_catch_up, interval=600, first=20)
-            app.job_queue.run_repeating(self.corsarr.job_budget, interval=600, first=60)
+            bot = self.corsarr
+            app.job_queue.run_repeating(bot.job_feedback, interval=jobs.FEEDBACK_INTERVAL, first=jobs.FEEDBACK_FIRST)
+            app.job_queue.run_repeating(bot.job_outage, interval=jobs.OUTAGE_INTERVAL, first=jobs.OUTAGE_FIRST)
+            app.job_queue.run_repeating(bot.job_downloads, interval=jobs.DOWNLOADS_INTERVAL,
+                                        first=jobs.DOWNLOADS_FIRST)
+            app.job_queue.run_repeating(bot.job_catch_up, interval=jobs.CATCH_UP_INTERVAL, first=jobs.CATCH_UP_FIRST)
+            app.job_queue.run_repeating(bot.job_budget, interval=jobs.BUDGET_INTERVAL, first=jobs.BUDGET_FIRST)
+            app.job_queue.run_repeating(bot.job_retention, interval=jobs.RETENTION_INTERVAL,
+                                        first=jobs.RETENTION_FIRST)
             await app.start()
             await app.updater.start_polling(
                 allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=True,

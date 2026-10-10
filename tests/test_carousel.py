@@ -1,67 +1,10 @@
+"""The browsable card: one photo message per recommendation, ◀️ ▶️ page through the suggestions."""
 import asyncio
 
 from telegram.error import TelegramError
 
-from corsarr.bot import CorsarrBot
 from corsarr.models import Candidate
-
-
-class Photo:
-    def __init__(self, file_id):
-        self.file_id = file_id
-
-
-class Sent:
-    """What Telegram returns for a sent/edited photo message."""
-    def __init__(self, message_id, file_id):
-        self.message_id = message_id
-        self.photo = [Photo(file_id)]
-
-
-class FakeTelegram:
-    def __init__(self):
-        self.sent = []
-
-    async def send_photo(self, chat_id, photo, caption=None, parse_mode=None, reply_markup=None):
-        self.sent.append((photo, caption, reply_markup))
-        return Sent(42, "file-page-1")
-
-
-class FakeMessage:
-    def __init__(self):
-        self.media_edits = []
-        self.caption_edits = []
-
-    async def edit_media(self, media, reply_markup=None):
-        self.media_edits.append((media, reply_markup))
-        return Sent(42, f"file-{len(self.media_edits)}")
-
-    async def edit_caption(self, caption=None, parse_mode=None, reply_markup=None):
-        self.caption_edits.append((caption, reply_markup))
-
-
-class FakeQuery:
-    def __init__(self):
-        self.message = FakeMessage()
-        self.from_user = type("U", (), {"first_name": "Sam"})()
-        self.answers = []
-
-    async def answer(self, text=None, **kwargs):
-        self.answers.append(text)
-
-
-class FakeJellyfin:
-    async def poster(self, item_id):
-        return b"jpeg-bytes"
-
-
-def make_bot(db):
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db, bot.jellyfin = db, FakeJellyfin()
-    bot.cfg = type("Cfg", (), {"chat_id": -100})()
-    bot.app = type("App", (), {"bot": FakeTelegram()})()
-    bot._card_locks, bot._nav_wanted = {}, {}  # set up by __init__, which the test skips
-    return bot
+from helpers import FakeQuery, Sent, labels, make_bot
 
 
 def picks():
@@ -73,14 +16,10 @@ def picks():
     return [(lib, "📱 passt, weil kung fu"), (new1, "📱 passt, weil kurier"), (new2, "")]
 
 
-def labels(markup):
-    return [[b.text for b in row] for row in markup.inline_keyboard]
-
-
 def test_one_message_for_all_suggestions(db):
     bot = make_bot(db)
     asyncio.run(bot._send_carousel(picks()))
-    [(photo, caption, markup)] = bot.app.bot.sent  # a single message, not one per title
+    [(photo, caption, markup)] = bot.app.bot.photos  # a single message, not one per title
     assert photo == b"jpeg-bytes" and "John Wick (2014)" in caption and "kung fu" in caption
     assert labels(markup) == [["✅ Schauen wir", "🙅 Nicht interessiert"], ["◀️", "1 / 3", "▶️"], ["🎬 Trailer"]]
     car = db.carousel(1)

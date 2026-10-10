@@ -36,6 +36,14 @@ def subscribed(watch_providers: list[dict] | None, region: str, provider_ids: se
     return names
 
 
+def _keywords(details: dict) -> list[str]:
+    """Lower-case keyword names of a title's details; tolerates the raw TMDB shape ({keywords: [...]})."""
+    kw = details.get("keywords") or []
+    if isinstance(kw, dict):
+        kw = kw.get("keywords") or kw.get("results") or []
+    return [k["name"].lower() for k in kw if "name" in k]
+
+
 class Jellyseerr:
     def __init__(self, url: str, api_key: str, track: bool = True):
         self.http = httpx.AsyncClient(base_url=f"{url}/api/v1", timeout=20,
@@ -133,10 +141,7 @@ class Jellyseerr:
                 log.warning(t("log.details_failed", title=c.label, error=e))
                 return
             c.genres = [g["name"] for g in d.get("genres", [])]
-            kw = d.get("keywords") or []
-            if isinstance(kw, dict):  # tolerate the raw TMDB shape
-                kw = kw.get("keywords") or kw.get("results") or []
-            c.keywords = [k["name"].lower() for k in kw if "name" in k]
+            c.keywords = _keywords(d)
             if c.media_type == "movie":
                 c.runtime_min = d.get("runtime") or None
             else:
@@ -236,7 +241,4 @@ class Jellyseerr:
     async def keywords_for(self, media_type: str, tmdb_id: int) -> tuple[list[str], list[str]]:
         """(genres, keywords) of a title – used to attach feedback to concrete tags."""
         d = await self.details(media_type, tmdb_id)
-        kw = d.get("keywords") or []
-        if isinstance(kw, dict):
-            kw = kw.get("keywords") or kw.get("results") or []
-        return [g["name"] for g in d.get("genres", [])], [k["name"].lower() for k in kw if "name" in k]
+        return [g["name"] for g in d.get("genres", [])], _keywords(d)

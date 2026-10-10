@@ -2,23 +2,23 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import html
 import json
 import logging
 import re
 import time
-from dataclasses import asdict
 from datetime import timedelta
 
 import httpx
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message, MessageEntity, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageEntity, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
-from . import arr, config, persona, usage
-from .i18n import default_language, language, normalize, switch_language, t, use_language
+from . import config, persona
+from .cards import CardsMixin, log_request_failed
+from .i18n import default_language, normalize, switch_language, t, use_language
+from .jobs import JobsMixin, in_chat_language
 from .monitor import health
 from .config import Config
 from .db import DEFAULT_SETTINGS, DB, iso, now
@@ -27,30 +27,19 @@ from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
 from .llm import LLM, LLMFailed, LLMUnavailable, Understanding
 from .translate import Translations
-from .models import Candidate, FilmCollection
-from .poster import placeholder_png
 from .recommender import Recommender
 
 log = logging.getLogger(__name__)
 
 SETTING_LIMITS = {"series_pause_days": (1, 365), "abort_days": (1, 60)}
-CAPTION_LIMIT = 1024
-
-
-def in_chat_language(method):
-    """Run a handler in the group's language – for everything the bot does without a fresh message."""
-    @functools.wraps(method)
-    async def wrapper(self, *args, **kwargs):
-        with use_language(self.chat_language()):
-            return await method(self, *args, **kwargs)
-    return wrapper
-
-
-
+OUTAGE_REPLY_INTERVAL = 1800  # seconds between "not reachable" replies while the model is down
+PRIVATE_CHATS_KEPT = 5        # people who wrote privately, offered as ADMIN_CHAT_ID in the web interface
+INTENT_LOG_CHARS = 120        # how much of a message the intent log line shows
 RATINGS_MARK = "🗳️"
 RATING_EMOJI = {"up": "👍", "meh": "😐", "down": "👎"}
 
-class CorsarrBot:
+
+class CorsarrBot(CardsMixin, JobsMixin):
     def __init__(self, cfg: Config, db: DB, jellyfin: Jellyfin, seerr: Jellyseerr, llm: LLM,
                  recommender: Recommender, feedback: FeedbackService):
         self.cfg, self.db, self.jellyfin, self.seerr = cfg, db, jellyfin, seerr
@@ -133,7 +122,7 @@ class CorsarrBot:
         if not msg or not user:
             return
         known = json.loads(self.db.get_state("private_chats") or "[]")
-        known = [c for c in known if c["id"] != msg.chat_id][-4:]  # the last five people
+        known = [c for c in known if c["id"] != msg.chat_id][-(PRIVATE_CHATS_KEPT - 1):]
         known.append({"id": msg.chat_id, "name": user.full_name or user.username or str(user.id), "at": iso(now())})
         self.db.set_state("private_chats", json.dumps(known, ensure_ascii=False))
         log.info(t("log.private_chat", name=user.full_name, id=msg.chat_id))
@@ -181,7 +170,7 @@ class CorsarrBot:
     async def _handle(self, msg: Message, text: str, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             if self.down and not await self._probe():
-                if time.monotonic() - self._last_outage_reply > 1800:
+                if time.monotonic() - self._last_outage_reply > OUTAGE_REPLY_INTERVAL:
                     self._last_outage_reply = time.monotonic()
                     await msg.reply_text(t("bot.outage"))
                 return
@@ -195,7 +184,7 @@ class CorsarrBot:
             und = await self.llm.understand(text or t("bot.hello"), self.db.recent_requests())
             await self._adopt_language(und)
             who = msg.from_user.first_name if msg.from_user else "?"
-            short = text if len(text) <= 120 else text[:119] + "…"
+            short = text if len(text) <= INTENT_LOG_CHARS else text[:INTENT_LOG_CHARS - 1] + "…"
             log.info(t("log.intent", who=who, text=short, intent=und.intent, types=und.media_types or "*",
                        genres=self.llm.requested_genres(und) or "*"))
             if und.intent in ("recommend", "new_only"):
@@ -254,270 +243,6 @@ class CorsarrBot:
             return
         await msg.reply_text(rec.intro)
         await self._send_carousel(rec.picks)
-
-    def _caption(self, c: Candidate, reason: str, note: str = "") -> str:
-        kind = t("bot.movie") if c.media_type == "movie" else t("bot.series")
-        lines = [f"<b>{html.escape(c.label)}</b>"]
-        if c.source == "library":
-            lines.append(t("bot.in_library", kind=kind))
-        elif c.source == "pending":
-            lines.append(t("bot.pending", kind=kind))
-        else:
-            lines.append(t("bot.not_available", kind=kind))
-            if c.streaming:  # on a service they already pay for – they may rather watch it there
-                lines.append(t("bot.streaming", providers=html.escape(", ".join(c.streaming[:4]))))
-        facts = []
-        if c.rating:
-            facts.append(t("bot.rating", rating=f"{float(c.rating):.1f}"))
-        if c.runtime_min:
-            per = t("bot.per_episode") if c.media_type == "tv" else ""
-            facts.append(t("bot.runtime", minutes=c.runtime_min) + per)
-        if c.seasons:
-            facts.append(t("bot.season_one") if c.seasons == 1 else t("bot.season_many", n=c.seasons))
-        if facts:
-            lines.append(" · ".join(facts))
-        if c.source == "new" and not note:
-            lines.append(t("bot.download_hint"))
-        tail = f"\n\n{html.escape(reason)}" if reason else ""
-        tail += f"\n\n<b>{note}</b>" if note else ""
-        head = "\n".join(lines)
-        room = CAPTION_LIMIT - len(head) - len(tail) - 4
-        overview = c.overview if len(c.overview) <= room else c.overview[: max(room - 1, 0)].rsplit(" ", 1)[0] + "…"
-        return f"{head}\n\n{html.escape(overview)}{tail}" if overview else f"{head}{tail}"
-
-    # --- browsable card: one photo message, ◀️ ▶️ switch between the suggestions ---------------
-    async def _send_carousel(self, picks: list[tuple[Candidate, str]]) -> None:
-        pages = []
-        for cand, reason in picks:
-            sid = self.db.add_suggestion(cand)
-            card = {"candidate": asdict(cand), "reason": reason, "lang": language()}
-            pages.append((sid, json.dumps(card, ensure_ascii=False)))
-            log.info(t("log.card", title=cand.label, source=cand.source, reason=reason or "–"))
-        cid = self.db.create_carousel(pages)
-        row, photo, caption, markup = await self._page(cid, 0)
-        try:
-            sent = await self.bot.send_photo(self.cfg.chat_id, photo, caption=caption,
-                                             parse_mode=ParseMode.HTML, reply_markup=markup)
-            self._remember_photo(row["id"], sent)
-        except TelegramError as e:  # e.g. Telegram could not fetch the poster URL
-            log.warning(t("log.card_failed", title=row["title"], error=e))
-            sent = await self.bot.send_photo(self.cfg.chat_id, placeholder_png(), caption=caption,
-                                             parse_mode=ParseMode.HTML, reply_markup=markup)
-            # the stand-in is not remembered as the poster: the next page change tries the real one again
-        self.db.set_carousel(cid, message_id=sent.message_id)
-
-    async def _page(self, cid: int, pos: int):
-        """Everything needed to show page `pos`: (suggestion row, photo, caption, buttons)."""
-        rows = self.db.carousel_pages(cid)
-        pos %= len(rows)
-        row = rows[pos]
-        card = json.loads(row["card"])
-        with use_language(card.get("lang")):  # a card stays in the language it was sent in
-            return await self._render_page(cid, pos, rows, row, card)
-
-    async def _render_page(self, cid: int, pos: int, rows, row, card: dict):
-        cand = Candidate(**card["candidate"])
-        caption = self._caption(cand, card["reason"], self._note(row))
-
-        buttons = []
-        if row["status"] == "suggested":
-            if cand.source == "new":
-                buttons.append(InlineKeyboardButton(t("bot.btn_request"), callback_data=f"req:{row['id']}"))
-            elif cand.source == "library":  # for new titles "request" already is the yes; pending: on its way
-                buttons.append(InlineKeyboardButton(t("bot.btn_accept"), callback_data=f"acc:{row['id']}"))
-            buttons.append(InlineKeyboardButton(t("bot.btn_reject"), callback_data=f"rej:{row['id']}"))
-        keyboard = [buttons] if buttons else []
-        if len(rows) > 1:
-            keyboard.append([
-                InlineKeyboardButton("◀️", callback_data=f"nav:{cid}:{(pos - 1) % len(rows)}"),
-                InlineKeyboardButton(f"{pos + 1} / {len(rows)}", callback_data="noop"),
-                InlineKeyboardButton("▶️", callback_data=f"nav:{cid}:{(pos + 1) % len(rows)}"),
-            ])
-        if cand.trailer_url and cand.trailer_url.startswith("https://"):
-            keyboard.append([InlineKeyboardButton(t("bot.btn_trailer"), url=cand.trailer_url)])
-        return row, await self._photo(row, cand), caption, InlineKeyboardMarkup(keyboard)
-
-    async def _photo(self, row, cand: Candidate):
-        if row["file_id"]:
-            return row["file_id"]  # already uploaded once – no new download
-        if cand.source == "library" and cand.jellyfin_id:
-            return await self.jellyfin.poster(cand.jellyfin_id) or placeholder_png()
-        return cand.poster_url or placeholder_png()
-
-    def _remember_photo(self, sid: int, message) -> None:
-        photo = getattr(message, "photo", None)  # edit_media may also return True instead of a message
-        if photo:
-            self.db.set_suggestion_file_id(sid, photo[-1].file_id)
-
-    @staticmethod
-    def _note(row) -> str:
-        who = html.escape(row["decided_by"] or t("bot.someone"))
-        return {"accepted": t("bot.accepted_note", who=who), "rejected": t("bot.rejected_note"),
-                "requested": t("bot.requested_by", who=who)}.get(row["status"], "")
-
-    def _card_lock(self, cid: int) -> asyncio.Lock:
-        """One edit per card at a time: Telegram cancels an edit when the next one for the same message
-        arrives before it finished ("Canceled by new edit message request")."""
-        return self._card_locks.setdefault(cid, asyncio.Lock())
-
-    async def _cb_nav(self, q, cid: int, pos: int) -> None:
-        await q.answer()  # right away – fetching the poster takes a moment, and a spinning button invites taps
-        if self.db.carousel(cid) is None:
-            return
-        self._nav_wanted[cid] = pos
-        await self._show_wanted(q.message, cid)
-
-    async def _show_wanted(self, message, cid: int) -> None:
-        """Show the page the newest tap asked for – unless someone else holds the card's lock: whoever has it
-        (a page change, a decision) shows the wish when done, so a tap during an edit is never lost."""
-        lock = self._card_lock(cid)
-        if lock.locked():
-            return
-        async with lock:
-            while (target := self._nav_wanted.pop(cid, None)) is not None:
-                await self._show_page(message, cid, target)
-
-    async def _show_page(self, message, cid: int, pos: int) -> None:
-        row, photo, caption, markup = await self._page(cid, pos)
-        try:
-            edited = await message.edit_media(
-                InputMediaPhoto(photo, caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
-            self._remember_photo(row["id"], edited)
-        except TelegramError as e:
-            text = str(e).lower()
-            if "not modified" in text or "canceled by new edit" in text:
-                return  # already showing this page / a newer change took over
-            log.warning(t("log.not_editable", error=e))
-            try:  # e.g. Telegram could not fetch the poster: show the page with a placeholder
-                await message.edit_media(
-                    InputMediaPhoto(placeholder_png(), caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
-            except TelegramError as e2:
-                log.warning(t("log.not_editable", error=e2))
-                return
-            # the stand-in is not remembered as the poster: the next page change tries the real one again
-        self.db.set_carousel(cid, position=pos % len(self.db.carousel_pages(cid)))
-
-    async def _decided(self, q, sid: int, note: str) -> None:
-        """Show a decision: redraw the card's current page, or append a note on older single cards."""
-        s = self.db.suggestion(sid)
-        car = self.db.carousel(s["carousel_id"]) if s and s["carousel_id"] else None
-        if car is None:
-            await self._mark(q, note)
-            return
-        cid = car["id"]
-        async with self._card_lock(cid):  # not in the middle of a page change
-            # The page shown *now* – someone may have paged on since the button was pressed. Then there is
-            # nothing to redraw: the note appears when they page back (the page is drawn from the database).
-            pos = self.db.carousel(cid)["position"]
-            rows = self.db.carousel_pages(cid)
-            if rows[pos % len(rows)]["id"] == sid:
-                _, _, caption, markup = await self._page(cid, pos)
-                try:
-                    await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
-                except TelegramError as e:
-                    log.warning(t("log.not_editable", error=e))
-        await self._show_wanted(q.message, cid)  # a tap that arrived meanwhile
-
-    # --- film series: one message listing all parts, one button requests the missing ones ----------
-    async def _send_collection(self, coll: FilmCollection, intro: str) -> None:
-        parts = []
-        for c in coll.parts:
-            # Missing parts get a suggestion row: it records who requested them (and was_requested sees it).
-            sid = self.db.add_suggestion(c) if c.source == "new" and c.tmdb_id else None
-            parts.append({"label": c.label, "source": c.source, "sid": sid})
-        card = {"name": coll.name, "poster_url": coll.poster_url, "intro": intro, "lang": language(),
-                "parts": parts}
-        col_id = self.db.add_collection(coll.tmdb_id, json.dumps(card, ensure_ascii=False))
-        caption, markup = self._collection_view(col_id, card)
-        try:
-            sent = await self.bot.send_photo(self.cfg.chat_id, coll.poster_url or placeholder_png(),
-                                             caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
-        except TelegramError as e:  # e.g. Telegram could not fetch the poster URL
-            log.warning(t("log.card_failed", title=coll.name, error=e))
-            sent = await self.bot.send_photo(self.cfg.chat_id, placeholder_png(), caption=caption,
-                                             parse_mode=ParseMode.HTML, reply_markup=markup)
-        self.db.set_collection_message(col_id, sent.message_id)
-
-    def _missing_parts(self, card: dict) -> list:
-        """Suggestion rows of the parts that are still missing (not requested via the bot yet)."""
-        rows = [self.db.suggestion(p["sid"]) for p in card["parts"] if p.get("sid")]
-        return [r for r in rows if r is not None and r["status"] != "requested"]
-
-    def _collection_view(self, col_id: int, card: dict) -> tuple[str, InlineKeyboardMarkup | None]:
-        with use_language(card.get("lang")):  # the message stays in the language it was sent in
-            lines = []
-            for p in card["parts"]:
-                title = html.escape(p["label"])
-                row = self.db.suggestion(p["sid"]) if p.get("sid") else None
-                if row is not None and row["status"] == "requested":
-                    lines.append(t("bot.coll_requested_by", title=title,
-                                   who=html.escape(row["decided_by"] or t("bot.someone"))))
-                else:
-                    key = {"library": "bot.coll_library", "pending": "bot.coll_pending",
-                           "blocked": "bot.coll_blocked"}.get(p["source"], "bot.coll_missing")
-                    lines.append(t(key, title=title))
-            head = f"<b>{html.escape(card['name'])}</b>"
-            intro = html.escape(card.get("intro") or "")
-            caption = "\n".join([head, *lines])
-            if intro and len(intro) + len(caption) + 2 <= CAPTION_LIMIT:
-                caption = f"{intro}\n\n{caption}"
-            while len(caption) > CAPTION_LIMIT and lines:  # very long series: cut the list
-                lines.pop()
-                more = t("bot.coll_more", n=len(card["parts"]) - len(lines))
-                caption = "\n".join([head, *lines, more])
-            missing = len(self._missing_parts(card))
-            if not missing:
-                return caption, None
-            button = InlineKeyboardButton(t("bot.btn_request_missing", n=missing), callback_data=f"col:{col_id}")
-            return caption, InlineKeyboardMarkup([[button]])
-
-    async def _cb_collection(self, q, col_id: int) -> None:
-        col = self.db.collection(col_id)
-        if col is None:
-            await q.answer()
-            return
-        card = json.loads(col["card"])
-        missing = self._missing_parts(card)
-        if not missing:
-            await q.answer(t("bot.coll_nothing_missing"))
-            return
-        who = q.from_user.first_name if q.from_user else t("bot.someone")
-        # Mark first: both people may press the button at the same time.
-        for s in missing:
-            self.db.set_suggestion_status(s["id"], "requested", who)
-        await q.answer()  # right away – the requests take a moment; the result goes into the message
-        results = await asyncio.gather(*(self.seerr.request("movie", s["tmdb_id"]) for s in missing),
-                                       return_exceptions=True)
-        requested, failed = [], 0
-        for s, res in zip(missing, results):
-            if isinstance(res, httpx.HTTPStatusError) and res.response.status_code == 409:
-                requested.append(s)  # already requested in Jellyseerr itself – on its way all the same
-            elif isinstance(res, BaseException):
-                self.db.set_suggestion_status(s["id"], s["status"])
-                failed += 1
-                if isinstance(res, httpx.HTTPStatusError):
-                    log.warning(t("log.request_failed", title=s["title"], status=res.response.status_code,
-                                  body=res.response.text))
-                else:
-                    log.warning(t("log.request_failed", title=s["title"], status="-", body=res))
-            else:
-                requested.append(s)
-                log.info(t("log.requested", title=s["title"], who=who))
-        caption, markup = self._collection_view(col_id, card)
-        try:
-            await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
-        except TelegramError as e:
-            log.warning(t("log.not_editable", error=e))
-        if failed:
-            await self.post(t("bot.coll_failed", n=failed), reply_to_message_id=q.message.message_id)
-        if not requested:
-            return
-        try:
-            text = await self.llm.say(t("sit.collection_requested"), self.speaker(), {
-                "series": card["name"], "titles": [s["title"] for s in requested], "requested_by": who})
-        except LLMFailed:
-            return
-        await self.post(text, reply_to_message_id=q.message.message_id)
 
     # --- settings --------------------------------------------------------------
     async def _settings(self, msg: Message, und: Understanding) -> None:
@@ -740,7 +465,7 @@ class CorsarrBot:
         if s["status"] == "requested":
             await q.answer(t("bot.already_requested"))
             return
-        who = q.from_user.first_name if q.from_user else t("bot.someone")
+        who = self._who(q)
         # Mark first: both people may press the button at the same time.
         self.db.set_suggestion_status(sid, "requested", who)
         await q.answer()  # right away – the request takes a moment; the result goes into the card
@@ -749,8 +474,7 @@ class CorsarrBot:
         except httpx.HTTPStatusError as e:
             if e.response.status_code != 409:  # 409: already requested in Jellyseerr itself – on its way all the same
                 self.db.set_suggestion_status(sid, s["status"])
-                log.warning(t("log.request_failed", title=s["title"], status=e.response.status_code,
-                              body=e.response.text))
+                log_request_failed(s["title"], e)
                 await self._post_failure(s["title"], t("bot.request_failed"))
                 return
         except httpx.HTTPError:
@@ -783,7 +507,7 @@ class CorsarrBot:
         if s["status"] == "accepted":
             await q.answer(t("bot.already_accepted"))
             return
-        who = q.from_user.first_name if q.from_user else t("bot.someone")
+        who = self._who(q)
         self.db.set_suggestion_status(sid, "accepted", who)
         log.info(t("log.accepted", title=s["title"], who=who))
         await q.answer(t("bot.accepted_answer"))
@@ -794,7 +518,7 @@ class CorsarrBot:
         if not s:
             await q.answer()
             return
-        who = q.from_user.first_name if q.from_user else t("bot.someone")
+        who = self._who(q)
         self.db.reject(s["title_key"], s["title"])
         self.db.set_suggestion_status(sid, "rejected", who)
         log.info(t("log.rejected", title=s["title"]))
@@ -836,86 +560,3 @@ class CorsarrBot:
         log.info(t("log.rated", title=req["title"], rating=note))
         await q.answer(note)
         await self._mark(q, note)
-
-    # --- jobs ----------------------------------------------------------------------
-    async def _probe(self) -> bool:
-        if self._probing:
-            return False  # a probe is under way (job and a message at once) – it posts "back" once
-        self._probing = True
-        try:
-            await self.llm.ping()
-        except (LLMUnavailable, LLMFailed):
-            return False
-        finally:
-            self._probing = False
-        self.down = False
-        log.info(t("log.llm_back", provider=self.llm.label))
-        await self.post(t("bot.recovered"))
-        return True
-
-    @in_chat_language
-    async def job_outage(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if self.down:
-            await self._probe()
-
-    @in_chat_language
-    async def job_downloads(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send bundled Sonarr/Radarr download messages whose imports have settled."""
-        for ids, text in arr.due_messages(self.db):
-            try:
-                await self.bot.send_message(self.cfg.notify_chat_id, text)
-            except TelegramError as e:
-                log.warning(t("log.notify_failed", error=e))
-                return  # keep them pending, retry next run
-            self.db.mark_imports_notified(ids)
-            log.info(t("log.notified", text=text))
-
-    @in_chat_language
-    async def job_budget(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Warn once per month at 80 % of the budget and once when it is used up – privately to the admin
-        if ADMIN_CHAT_ID is set, else in the group."""
-        budget = usage.budget_usd(self.cfg)
-        cost = usage.month_cost(self.db) if budget else None
-        if not budget or cost is None:
-            return
-        month = usage.month_start().strftime("%Y-%m")
-        warned = self.db.get_state(f"budget_warned:{month}") or ""
-        if cost >= budget and warned != "100":
-            text, level = t("bot.budget_reached", cost=usage.usd(cost), budget=usage.usd(budget)), "100"
-        elif cost >= usage.WARN_SHARE * budget and not warned:
-            text, level = t("bot.budget_warning", cost=usage.usd(cost), budget=usage.usd(budget),
-                            pct=round(100 * cost / budget)), "80"
-        else:
-            return
-        target = int(self.cfg.get("ADMIN_CHAT_ID") or 0) or self.cfg.chat_id
-        try:
-            await self.bot.send_message(target, text)
-        except TelegramError as e:
-            log.warning(t("log.notify_failed", error=e))
-            return
-        self.db.set_state(f"budget_warned:{month}", level)
-        log.info(t("log.budget_warned", level=level, cost=f"{cost:.4f}", budget=f"{budget:.2f}"))
-
-    async def job_catch_up(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Imports whose webhook never arrived (Corsarr offline, network) – only with remembered access."""
-        for kind in ("sonarr", "radarr"):
-            url, key = self.cfg.get(f"{kind.upper()}_URL"), self.cfg.get(f"{kind.upper()}_API_KEY")
-            if not (url and key):
-                continue
-            try:
-                added = await arr.catch_up(self.db, kind, url, key)
-            except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
-                log.warning(t("log.catch_up_failed", service=kind.capitalize(), error=e))
-                continue
-            if added:
-                log.info(t("log.catch_up", service=kind.capitalize(), n=added))
-
-    @in_chat_language
-    async def job_feedback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if self.down:
-            return
-        await self.load_genres()
-        try:
-            await self.feedback.tick()
-        except Exception:
-            log.exception(t("log.feedback_job_failed"))

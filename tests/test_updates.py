@@ -77,6 +77,23 @@ def test_running_update_is_detected_from_trigger_and_log(tmp_path, monkeypatch):
     assert not updates.updating(tmp_path)  # stale log: don't spin forever
 
 
+def test_update_log_lives_where_the_root_service_writes_it(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORSARR_UPDATE_TRIGGER", raising=False)
+    monkeypatch.delenv("CORSARR_UPDATE_LOG", raising=False)
+    assert updates.log_path(tmp_path) == tmp_path / "logs" / "update.log"  # Docker / manual: as before
+    assert updates.log_path(None) is None and not updates.updating(None) and updates.log_tail(None) == ""
+    log = tmp_path / "var-log-update.log"
+    monkeypatch.setenv("CORSARR_UPDATE_LOG", str(log))  # service: root-owned file outside the data dir
+    assert updates.log_path(tmp_path) == log
+    log.write_text("==> Fetching v1.2.1 …\n==> Setting up Python environment for v1.2.1 …\n")
+    assert updates.updating(tmp_path) and updates.log_tail(tmp_path, lines=1) == "==> Setting up Python environment for v1.2.1 …"
+    # The installer quotes the service's journal before rolling back; an "Error:" in there is not the end.
+    log.write_text(log.read_text() + "Oct 10 12:00:00 corsarr[1]: Error: database is locked\n" + "x\n" * updates.FINAL_LINES)
+    assert updates.updating(tmp_path)
+    log.write_text(log.read_text() + "Error: Update to v1.2.1 failed – rolled back to v1.2.0, which is running again.\n")
+    assert not updates.updating(tmp_path)
+
+
 def test_install_kind(monkeypatch):
     monkeypatch.delenv("CORSARR_VERSION", raising=False)
     monkeypatch.setenv("CORSARR_UPDATE_TRIGGER", "/tmp/x")
@@ -136,3 +153,6 @@ def test_version_file_and_targets(tmp_path, monkeypatch):
     assert updates.current_version() == "v1.2.1"
     assert updates.valid_target("v1.3.0-beta.2") and updates.valid_target("main")
     assert not updates.valid_target("v1.2") and not updates.valid_target("--upload-pack=x")
+    # Only vX.Y.Z and vX.Y.Z-beta.N are releases; other pre-release styles are ignored everywhere.
+    for odd in ("v1.2.3-rc.1", "v1.2.3-alpha.1", "v1.2.3-beta", "1.2.3", "v1.2.3.4"):
+        assert updates.version_key(odd) is None and not updates.valid_target(odd)

@@ -1,0 +1,31 @@
+# Dependabot opens pull requests for outdated or vulnerable dependencies (CI runs on each of them).
+# - pip: requirements.txt is the pinned set generated from requirements.in (docs/Development.md →
+#   "Updating dependencies"); after merging a batch of these PRs, regenerate it once to keep the file tidy.
+# - github-actions: the SHA-pinned actions in .github/workflows/*.yml (the "# vX.Y.Z" comments are updated too).
+# - docker: the base image in the Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+    labels: [dependencies]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]

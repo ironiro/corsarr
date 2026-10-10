@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+def label(title: str | None, year: int | str | None) -> str:
+    """'Heat (1995)' – or just the title when the year is unknown."""
+    title = title or "?"
+    return f"{title} ({year})" if year else title
+
+
 def title_key(media_type: str, tmdb_id: int | str | None, jellyfin_id: str | None = None) -> str:
     """Stable identity across Jellyfin and TMDB: prefer the TMDB id."""
     if tmdb_id:
@@ -36,7 +42,7 @@ class Candidate:
 
     @property
     def label(self) -> str:
-        return f"{self.title} ({self.year})" if self.year else self.title
+        return label(self.title, self.year)
 
 
 @dataclass

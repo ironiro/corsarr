@@ -113,9 +113,13 @@ def read(data: bytes, password: str) -> tuple[dict, dict, bytes | None]:
     return manifest, settings, database
 
 
+RESTORE_DIR = "backups"
+RESTORE_PREFIX = "pre-restore-"
+
+
 def restore(data_dir: Path, settings: dict, database: bytes | None) -> Path:
     """Replace database and settings (the bot must be stopped). Returns where the old data was moved."""
-    keep = data_dir / "backups" / f"pre-restore-{time.strftime('%Y%m%d-%H%M%S')}"
+    keep = data_dir / RESTORE_DIR / f"{RESTORE_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}"
     keep.mkdir(parents=True, exist_ok=True)
     for name in ("corsarr.db", "corsarr.db-wal", "corsarr.db-shm", config.OVERRIDES_FILE):
         if (data_dir / name).exists():
@@ -126,6 +130,19 @@ def restore(data_dir: Path, settings: dict, database: bytes | None) -> Path:
         tmp.replace(data_dir / "corsarr.db")
     config.write_overrides(data_dir, clean_settings(config._migrate_overrides(settings)))
     return keep
+
+
+def prune_restores(data_dir: Path, keep: int) -> int:
+    """Delete all but the newest `keep` pre-restore copies (their names sort by time). Returns how many went."""
+    folder = data_dir / RESTORE_DIR
+    if not folder.is_dir():
+        return 0
+    old = sorted(p for p in folder.iterdir() if p.is_dir() and p.name.startswith(RESTORE_PREFIX))
+    removed = 0
+    for path in old[:-keep] if keep > 0 else old:
+        shutil.rmtree(path, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def clean_settings(settings: dict) -> dict[str, str]:

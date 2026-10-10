@@ -1,65 +1,29 @@
 """Ratings per person: everyone rates, the question stays open until all did, and the taste is per person."""
 import asyncio
 
-from corsarr.bot import CorsarrBot
 from corsarr.db import now
-from corsarr.feedback import FeedbackService
 from corsarr.models import Candidate
 from corsarr.profile import build_profile
+from helpers import FakeMessage, FakeQuery, FakeUser, NoTags, Profiles, make_bot
 
 
-class NoTags(FeedbackService):
-    async def title_tags(self, req):
-        return ["Horror"], ["gore"]
-
-
-class Profiles:
-    def invalidate(self):
-        pass
-
-
-class User:
-    def __init__(self, uid, name):
-        self.id, self.first_name, self.full_name, self.is_bot = uid, name, name, False
-
-
-class Msg:
-    def __init__(self, text):
-        self.text_html, self.reply_markup, self.edits = text, "KEYBOARD", []
-
-    async def edit_text(self, text, **kwargs):
-        self.text_html, self.reply_markup = text, kwargs.get("reply_markup")
-        self.edits.append(text)
-
-
-class Query:
-    def __init__(self, user, msg):
-        self.from_user, self.message, self.answers = user, msg, []
-
-    async def answer(self, text=None):
-        self.answers.append(text)
-
-
-def make_bot(db):
-    bot = CorsarrBot.__new__(CorsarrBot)
-    bot.db = db
-    bot.feedback = NoTags(db, None, None, Profiles())
-    return bot
+def people_bot(db):
+    return make_bot(db, feedback=NoTags(db, None, None, Profiles()))
 
 
 def test_both_rate_the_question_stays_open_until_then_and_rating_again_replaces(db):
-    bot = make_bot(db)
-    sam, alex = User(1, "Sam"), User(2, "Alex")
+    bot = people_bot(db)
+    sam, alex = FakeUser(1, "Sam"), FakeUser(2, "Alex")
     bot._note_member(sam), bot._note_member(alex)
     rid = db.add_request("movie", "movie:9", "jf9", "Heat (1995)", "movie", now(), status="sent")
-    msg = Msg("🎬 <b>Heat (1995)</b>\n\nhow was it?")
+    msg = FakeMessage("🎬 <b>Heat (1995)</b>\n\nhow was it?", reply_markup="KEYBOARD")
 
-    asyncio.run(bot._cb_rating(Query(sam, msg), rid, "up"))
+    asyncio.run(bot._cb_rating(FakeQuery(user=sam, message=msg), rid, "up"))
     assert db.request(rid)["status"] == "sent" and msg.reply_markup == "KEYBOARD"  # Alex hasn't rated
     assert msg.text_html.endswith("🗳️ 👍 Sam")
-    asyncio.run(bot._cb_rating(Query(sam, msg), rid, "meh"))  # Sam changes their mind
+    asyncio.run(bot._cb_rating(FakeQuery(user=sam, message=msg), rid, "meh"))  # Sam changes their mind
     assert msg.text_html.endswith("🗳️ 😐 Sam") and msg.text_html.count("🗳️") == 1
-    asyncio.run(bot._cb_rating(Query(alex, msg), rid, "down"))
+    asyncio.run(bot._cb_rating(FakeQuery(user=alex, message=msg), rid, "down"))
     assert db.request(rid)["status"] == "answered" and msg.reply_markup is None
     assert msg.text_html.endswith("🗳️ 😐 Sam · 👎 Alex")
     rows = db.all_feedback()
@@ -67,9 +31,9 @@ def test_both_rate_the_question_stays_open_until_then_and_rating_again_replaces(
 
 
 def test_a_single_known_person_closes_the_question_alone(db):
-    bot = make_bot(db)
+    bot = people_bot(db)
     rid = db.add_request("movie", "movie:9", "jf9", "Heat (1995)", "movie", now(), status="sent")
-    asyncio.run(bot._cb_rating(Query(User(1, "Sam"), Msg("q")), rid, "up"))
+    asyncio.run(bot._cb_rating(FakeQuery(user=FakeUser(1, "Sam")), rid, "up"))
     assert db.request(rid)["status"] == "answered"
 
 
