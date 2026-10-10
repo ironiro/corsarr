@@ -5,6 +5,7 @@ from corsarr.bot import CorsarrBot
 from corsarr.db import now
 from corsarr.llm import FeedbackIntent, SettingsChange, Understanding
 from corsarr.models import Candidate
+from corsarr.translate import Translations
 
 
 def run(coro):
@@ -26,6 +27,13 @@ class FakeLLM:
 
     async def say(self, situation, speaker, facts=None):
         return f"[{i18n.language()}]"
+
+    async def translate(self, lang, texts):
+        self.translated = getattr(self, "translated", 0) + 1
+        # a translation that keeps placeholders/tags, and one broken one that must be rejected
+        out = {k: f"«{lang}» {v}" for k, v in texts.items()}
+        out["bot.btn_reject"] = "pas intéressé {oops}"
+        return out
 
 
 class FakeTelegram:
@@ -57,6 +65,7 @@ def make_bot(db, language):
     bot.cfg = type("Cfg", (), {"chat_id": -100})()
     bot.app = type("App", (), {"bot": FakeTelegram()})()
     bot.speaker = lambda: "normal"
+    bot.translations = Translations(db, bot.llm)
     return bot
 
 
@@ -75,7 +84,30 @@ def test_answers_in_the_language_it_is_addressed_in(db):
     i18n.set_language("de")
     assert handle(make_bot(db, "en"), "hey, what can you do?") == ["[en]"]
     assert handle(make_bot(db, "de"), "na, was kannst du?") == ["[de]"]
-    assert handle(make_bot(db, "fr"), "salut") == ["[en]"]  # no French texts: English instead
+    bot = make_bot(db, "fr")
+    assert handle(bot, "salut") == ["[fr]"]  # any language, not only German and English
+    assert db.get_state("chat_language") == "fr"
+
+
+def test_fixed_texts_are_translated_once_and_checked(db):
+    bot = make_bot(db, "fr")
+    handle(bot, "salut")
+    handle(bot, "encore")
+    assert bot.llm.translated == 1  # stored: the second message needs no model call
+    with i18n.use_language("fr"):
+        assert i18n.t("bot.btn_accept").startswith("«fr» ")
+        assert i18n.t("bot.btn_reject") == "🙅 Not interested"  # broken placeholder rejected -> English
+        assert i18n.t("bot.rating", rating="8.1") == "«fr» " + i18n.EN["bot.rating"].format(rating="8.1")
+        assert i18n.t("prompt.say", speaker="x", situation="y").startswith("Task:")  # instructions stay English
+    i18n._translated.clear()
+    Translations(db, bot.llm)  # after a restart: loaded from the database
+    with i18n.use_language("fr"):
+        assert i18n.t("bot.btn_accept").startswith("«fr» ")
+
+
+def test_language_codes_are_normalised():
+    assert i18n.normalize("de-AT") == "de" and i18n.normalize("PT_br") == "pt"
+    assert i18n.normalize("und") is None and i18n.normalize("") is None and i18n.normalize("🎬") is None
 
 
 def test_unprompted_messages_use_the_groups_last_language(db):

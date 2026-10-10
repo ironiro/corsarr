@@ -5,12 +5,19 @@ bot.* fixed Telegram texts and buttons, sit.* situations the model phrases, prom
 instructions, log.* log lines, check.* connectivity check, cfg.* config errors, gui.* web interface.
 
 Two levels of language:
-- the default (setting LANGUAGE): web interface, and the bot until the group has written to it;
-- per request: the bot answers in the language it was addressed in. `use_language()` sets it for the
-  current task only, so a German and an English message handled at the same time don't mix.
+- the default (setting LANGUAGE, German or English): web interface, and the bot until the group has
+  written to it;
+- per request: the bot answers in the language it was addressed in – any language. `use_language()`
+  sets it for the current task only, so messages in different languages handled at the same time don't mix.
+
+German and English have built-in texts. For any other language the model writes its replies in that
+language directly, and the fixed Telegram texts (bot.*, notify.*: buttons, card lines, download messages)
+are translated once by the model and stored (see translate.py). Everything else falls back to English.
 """
 from __future__ import annotations
 
+import re
+import string
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -35,28 +42,56 @@ def language() -> str:
     return _current.get() or _default
 
 
-def supported(lang: str | None) -> str:
-    """Map any language code to one with texts: German stays German, everything else gets English."""
-    return "de" if (lang or "").lower().startswith("de") else "en"
+def normalize(lang: str | None) -> str | None:
+    """'de-AT' -> 'de', 'PT_br' -> 'pt'; None for anything that isn't a language code."""
+    primary = re.split(r"[-_]", (lang or "").strip().lower())[0]
+    return primary if re.fullmatch(r"[a-z]{2,3}", primary) and primary not in ("und", "zxx", "mul") else None
 
 
 @contextmanager
 def use_language(lang: str | None) -> Iterator[None]:
-    token = _current.set(supported(lang) if lang else None)
+    token = _current.set(normalize(lang))
     try:
         yield
     finally:
         _current.reset(token)
 
 
-def switch_language(lang: str) -> None:
-    """Change the language inside a `use_language` block, e.g. once a message's language is known."""
-    _current.set(supported(lang))
+def switch_language(lang: str | None) -> None:
+    """Change the language inside a `use_language` block, e.g. once a message's language is known.
+    Unknown codes (e.g. a message of only emojis) keep the current language."""
+    if normalize(lang):
+        _current.set(normalize(lang))
+
+
+# --- other languages: fixed Telegram texts translated by the model --------------------------
+TRANSLATED_PREFIXES = ("bot.", "notify.")
+_translated: dict[str, dict[str, str]] = {}  # lang -> key -> text
+
+
+def has_builtin(lang: str) -> bool:
+    return lang in TEXTS
+
+
+def translatable() -> dict[str, str]:
+    """English source of every text that is translated for other languages."""
+    return {k: v for k, v in EN.items() if k.startswith(TRANSLATED_PREFIXES)}
+
+
+def add_translations(lang: str, texts: dict[str, str]) -> None:
+    _translated.setdefault(lang, {}).update(texts)
+
+
+def placeholders(text: str) -> set[str]:
+    return {name for _, name, _, _ in string.Formatter().parse(text) if name}
 
 
 def t(key: str, **kwargs) -> str:
     lang = "en" if key.startswith("log.") else language()  # logs are technical: always English
-    text = TEXTS[lang].get(key) or TEXTS["en"].get(key) or key
+    if lang in TEXTS:
+        text = TEXTS[lang].get(key) or EN.get(key) or key
+    else:  # translated fixed texts; model instructions and the rest in English
+        text = _translated.get(lang, {}).get(key) or EN.get(key) or key
     return text.format(**kwargs) if kwargs else text
 
 
@@ -281,6 +316,10 @@ feedback.rating dann "none" und feedback.text leer.""",
     "setup.arr_rejected": "Abgelehnt: {error} – erreicht der Dienst Corsarr unter dieser Adresse?",
     "log.catch_up": "Aus dem {service}-Verlauf nachgeholt: {n} Import(e), deren Webhook nicht ankam",
     "log.catch_up_failed": "{service}-Verlauf nicht lesbar: {error}",
+    "prompt.output_language": "Sprache: Schreib alles, was die Gruppe liest, in der Sprache mit dem ISO-Code „{lang}“ – der Sprache ihrer Nachricht.",
+    "prompt.translate": "Aufgabe: Übersetze diese festen Texte eines Telegram-Bots aus dem Englischen in die Sprache mit dem ISO-Code „{lang}“. Kurz und natürlich, wie in einer Chat-App. Behalte {{Platzhalter}}, HTML-Tags wie <b>, Emojis und Zeilenumbrüche genau bei. Gib jeden Schlüssel genau einmal zurück.\n\nTexte (JSON, Schlüssel → Text): {texts}",
+    "log.translated": "Feste Texte auf {lang} übersetzt: {n} von {total}",
+    "log.translate_failed": "Übersetzung auf {lang} fehlgeschlagen, solange Englisch: {error}",
     "log.llm_down": "{provider} nicht verfügbar: {reason}",
     "log.llm_back": "{provider} wieder erreichbar",
     "log.genres_failed": "Genrelisten nicht ladbar (neuer Versuch später): {error}",
@@ -882,6 +921,10 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
     "setup.arr_rejected": "Rejected: {error} – can the service reach Corsarr at this address?",
     "log.catch_up": "Caught up from the {service} history: {n} import(s) whose webhook never arrived",
     "log.catch_up_failed": "Could not read the {service} history: {error}",
+    "prompt.output_language": "Language: write everything the group reads in the language with ISO code “{lang}” – the language of their message.",
+    "prompt.translate": "Task: translate these fixed texts of a Telegram bot from English into the language with ISO code “{lang}”. Short and natural, like in a chat app. Keep {{placeholders}}, HTML tags like <b>, emojis and line breaks exactly. Return every key exactly once.\n\nTexts (JSON, key → text): {texts}",
+    "log.translated": "Fixed texts translated into {lang}: {n} of {total}",
+    "log.translate_failed": "Translation into {lang} failed, English until then: {error}",
     "log.llm_down": "{provider} unavailable: {reason}",
     "log.llm_back": "{provider} reachable again",
     "log.genres_failed": "Could not load genre lists (retrying later): {error}",

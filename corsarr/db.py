@@ -97,6 +97,13 @@ CREATE TABLE IF NOT EXISTS arr_imports (
     notified INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_arr_pending ON arr_imports(notified, group_key);
+CREATE TABLE IF NOT EXISTS translations (
+    lang TEXT NOT NULL,                -- language without built-in texts, e.g. 'fr'
+    key TEXT NOT NULL,                 -- i18n key, e.g. 'bot.btn_accept'
+    source TEXT NOT NULL,              -- the English text it was translated from (changes -> translate again)
+    text TEXT NOT NULL,
+    PRIMARY KEY (lang, key)
+);
 CREATE TABLE IF NOT EXISTS watch_state (
     jellyfin_id TEXT PRIMARY KEY,      -- movie id or series id
     title_key TEXT NOT NULL,
@@ -392,6 +399,18 @@ class DB:
             "SELECT 1 FROM arr_imports WHERE group_key=? AND season IS ? AND episode IS ? AND created_at>=? LIMIT 1",
             (group_key, season, episode, iso(since))).fetchone()
         return row is not None
+
+    # --- translations of fixed texts ----------------------------------------
+    def translations(self) -> list[tuple[str, str, str, str]]:
+        return [tuple(r) for r in self.conn.execute("SELECT lang, key, source, text FROM translations")]
+
+    def save_translations(self, lang: str, texts: dict[str, tuple[str, str]]) -> None:
+        """texts: key -> (English source, translation)"""
+        self.conn.executemany(
+            "INSERT INTO translations(lang, key, source, text) VALUES(?,?,?,?) "
+            "ON CONFLICT(lang, key) DO UPDATE SET source=excluded.source, text=excluded.text",
+            [(lang, k, src, txt) for k, (src, txt) in texts.items()])
+        self.conn.commit()
 
     def pending_imports(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM arr_imports WHERE notified=0 ORDER BY id")
