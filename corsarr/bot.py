@@ -736,7 +736,9 @@ class CorsarrBot:
         text = await self.llm.say(
             t("sit.requested"), speaker,
             {"title": s["title"], "type": s["media_type"], "requested_by": who})
-        await self.post(text, reply_to_message_id=q.message.message_id)
+        # Not as a reply: Telegram quotes the card as it looks *now*, so after paging on the quote would
+        # show another title. The message names the title itself.
+        await self.post(text)
 
     async def _cb_accept(self, q, sid: int) -> None:
         s = self.db.suggestion(sid)
