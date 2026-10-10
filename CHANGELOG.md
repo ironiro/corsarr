@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.1
+
+- The message confirming a request from a suggestion card is no longer a reply to the card: Telegram quotes
+  the card as it looks at the moment, so after paging on the quote showed a different title.
+
 ## v1.0.0 – first stable release
 
 Everything since v0.9.0. Corsarr is a Telegram bot for movie night: suggestions from your Jellyfin library and
