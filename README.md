@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ironiro/corsarr/releases/latest"><img src="https://img.shields.io/github/v/release/ironiro/corsarr?sort=semver&color=ff3ec9&label=release" alt="Latest release"></a>
+  <a href="https://github.com/ironiro/corsarr/tags"><img src="https://img.shields.io/github/v/tag/ironiro/corsarr?sort=semver&filter=!*beta*&color=ff3ec9&label=release" alt="Latest release"></a>
   <a href="https://github.com/ironiro/corsarr/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ironiro/corsarr/ci.yml?branch=main&label=build" alt="Build status"></a>
   <a href="https://github.com/ironiro/corsarr/pkgs/container/corsarr"><img src="https://img.shields.io/badge/docker-ghcr.io-2ef2ff?logo=docker&logoColor=white" alt="Docker image"></a>
   <img src="https://img.shields.io/badge/python-3.12-ffe66d?logo=python&logoColor=white" alt="Python 3.12">
@@ -62,27 +62,19 @@
 
 ## 🚀 Quick start
 
-<table>
-<tr><th>Proxmox (recommended)</th><th>Docker</th></tr>
-<tr><td>
-
-In the Proxmox host shell – creates a Debian 12 container (1 core, 512 MB) and installs Corsarr:
+**Proxmox** (recommended) – in the Proxmox host shell; creates a Debian 12 container (1 core, 512 MB) and
+installs Corsarr in it:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)"
 ```
 
-</td><td>
+**Docker** – images for amd64 and arm64 on `ghcr.io/ironiro/corsarr` (`:latest`, `:beta`, `:edge`):
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ironiro/corsarr/main/docker-compose.yml
 docker compose up -d
 ```
-
-Images for amd64 and arm64 on `ghcr.io/ironiro/corsarr` (`:latest`, `:beta`, `:edge`).
-
-</td></tr>
-</table>
 
 Then open **`http://<ip>:8787/`** – the setup assistant walks you through Telegram, the AI provider, Jellyfin,
 Jellyseerr/Seerr and the webhooks, and tests each connection before saving it.
