@@ -223,3 +223,31 @@ def test_watch_provider_routes_are_called_without_language():
     assert asyncio.run(seerr.watch_regions())[0]["code"] == "DE"
     assert asyncio.run(seerr.watch_providers("DE"))[0]["name"] == "Netflix"
     assert all("language" not in params for _, params in seen)
+
+
+def test_settings_message_with_streaming_services_does_not_crash(tmp_path, monkeypatch):
+    """'wir haben netflix' saved the services and then failed on the reply (KeyError 'streaming_set')."""
+    import asyncio
+    from corsarr import config
+    from corsarr.bot import CorsarrBot
+    from corsarr.llm import FeedbackIntent, SettingsChange, Understanding
+    for f in config.FIELDS:
+        monkeypatch.delenv(f.name, raising=False)
+    monkeypatch.setenv("CORSARR_ENV_FILE", str(tmp_path / "none.env"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from corsarr.db import DB
+    bot = CorsarrBot.__new__(CorsarrBot)
+    bot.cfg, bot.db = config.load(), DB(tmp_path / "t.db")
+    said = []
+
+    async def fake_streaming(s):
+        return {"streaming_services_now": ["Netflix"], "not_found": []}
+
+    async def fake_say(msg, situation, facts=None):
+        said.append(facts)
+    bot._set_streaming, bot._say_reply = fake_streaming, fake_say
+    und = Understanding(intent="settings", media_types=[], jellyfin_genres=[], tmdb_movie_genre_ids=[],
+                        tmdb_tv_genre_ids=[], settings=SettingsChange(streaming_set=["Netflix"]),
+                        feedback=FeedbackIntent(rating="none", text=""))
+    asyncio.run(bot._settings(None, und))
+    assert said and said[0]["changed"]["streaming"]["streaming_services_now"] == ["Netflix"]

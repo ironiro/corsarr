@@ -63,6 +63,10 @@ class Recommender:
                 c.score = profile.score(c) - (1.0 if c.key in recent else 0.0)
             library.sort(key=rank, reverse=True)
         new = await self._new_titles(und, media_types, exclude | {c.key for c in library}, recent)
+        if und.max_runtime_min:  # "max 2 hours": drop what is known to be longer
+            limit = und.max_runtime_min
+            library = [c for c in library if not c.runtime_min or c.runtime_min <= limit]
+            new = [c for c in new if not c.runtime_min or c.runtime_min <= limit]
         new.sort(key=rank, reverse=True)
 
         lib_pool, new_pool = library[:LIBRARY_POOL], new[:NEW_POOL]

@@ -21,7 +21,7 @@ from . import arr, config, persona, usage
 from .i18n import default_language, language, normalize, switch_language, t, use_language
 from .monitor import health
 from .config import Config
-from .db import DB, iso, now
+from .db import DEFAULT_SETTINGS, DB, iso, now
 from .feedback import FeedbackService
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
@@ -345,21 +345,41 @@ class CorsarrBot:
         return {"accepted": t("bot.accepted_note", who=who), "rejected": t("bot.rejected_note"),
                 "requested": t("bot.requested_by", who=who)}.get(row["status"], "")
 
+    def _card_lock(self, cid: int) -> asyncio.Lock:
+        """One edit per card at a time: Telegram cancels an edit when the next one for the same message
+        arrives before it finished ("Canceled by new edit message request")."""
+        locks = self.__dict__.setdefault("_card_locks", {})
+        return locks.setdefault(cid, asyncio.Lock())
+
     async def _cb_nav(self, q, cid: int, pos: int) -> None:
+        await q.answer()  # right away – fetching the poster takes a moment, and a spinning button invites taps
         if self.db.carousel(cid) is None:
-            await q.answer()
             return
+        wanted = self.__dict__.setdefault("_nav_wanted", {})
+        wanted[cid] = pos
+        lock = self._card_lock(cid)
+        if lock.locked():
+            return  # the page change in progress picks up the newest wish when it is done
+        async with lock:
+            while (target := wanted.pop(cid, None)) is not None:
+                await self._show_page(q.message, cid, target)
+
+    async def _show_page(self, message, cid: int, pos: int) -> None:
         row, photo, caption, markup = await self._page(cid, pos)
-        await q.answer()
         try:
-            edited = await q.message.edit_media(
+            edited = await message.edit_media(
                 InputMediaPhoto(photo, caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
         except TelegramError as e:
-            if "not modified" in str(e).lower():
-                return  # both pressed at once – already showing this page
+            text = str(e).lower()
+            if "not modified" in text or "canceled by new edit" in text:
+                return  # already showing this page / a newer change took over
             log.warning(t("log.not_editable", error=e))
-            edited = await q.message.edit_media(
-                InputMediaPhoto(placeholder_png(), caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
+            try:  # e.g. Telegram could not fetch the poster: show the page with a placeholder
+                edited = await message.edit_media(
+                    InputMediaPhoto(placeholder_png(), caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
+            except TelegramError as e2:
+                log.warning(t("log.not_editable", error=e2))
+                return
         self.db.set_carousel(cid, position=pos % len(self.db.carousel_pages(cid)))
         self._remember_photo(row["id"], edited)
 
@@ -371,11 +391,12 @@ class CorsarrBot:
             await self._mark(q, note)
             return
         ids = [r["id"] for r in self.db.carousel_pages(car["id"])]
-        _, _, caption, markup = await self._page(car["id"], ids.index(sid))
-        try:
-            await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
-        except TelegramError as e:
-            log.warning(t("log.not_editable", error=e))
+        async with self._card_lock(car["id"]):  # not in the middle of a page change
+            _, _, caption, markup = await self._page(car["id"], ids.index(sid))
+            try:
+                await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
+            except TelegramError as e:
+                log.warning(t("log.not_editable", error=e))
 
     # --- film series: one message listing all parts, one button requests the missing ones ----------
     async def _send_collection(self, coll: FilmCollection, intro: str) -> None:
@@ -482,7 +503,7 @@ class CorsarrBot:
     # --- settings --------------------------------------------------------------
     async def _settings(self, msg: Message, und: Understanding) -> None:
         changes = {k: v for k, v in und.settings.model_dump().items()
-                   if v is not None and k not in ("characters_on", "characters_off")}
+                   if v is not None and k in DEFAULT_SETTINGS}  # characters and streaming are handled below
         # "only grandma" arrives as on=[grandma], off=[everyone else]; unknown ids are ignored
         for cid in und.settings.characters_off:
             if cid in persona.CHARACTERS:

@@ -112,3 +112,28 @@ def test_decision_redraws_only_that_page(db):
     media, markup = q2.message.media_edits[0]
     assert "Ausgewählt von Sam" in media.caption and labels(markup)[0] == ["◀️", "1 / 3", "▶️"]
     assert media.media == "file-page-1"  # poster reused, not downloaded again
+
+
+def test_fast_taps_end_on_the_last_wished_page_without_overlapping_edits(db):
+    """Telegram cancels an edit when the next one for the same message arrives first – so edits of one
+    card must never overlap, and a burst of taps only needs the newest page."""
+    bot = make_bot(db)
+    asyncio.run(bot._send_carousel(picks()))
+    cid = db.conn.execute("SELECT id FROM carousels").fetchone()[0]
+    q = FakeQuery()
+    active, overlaps = [0], [0]
+
+    async def slow_edit(media, reply_markup=None):
+        active[0] += 1
+        overlaps[0] = max(overlaps[0], active[0])
+        await asyncio.sleep(0.02)  # Telegram fetching the poster
+        active[0] -= 1
+        q.message.media_edits.append((media, reply_markup))
+        return Sent(42, f"file-{len(q.message.media_edits)}")
+    q.message.edit_media = slow_edit
+
+    async def taps():
+        await asyncio.gather(*(bot._cb_nav(q, cid, p) for p in (1, 0, 1)))
+    asyncio.run(taps())
+    assert overlaps[0] == 1 and len(q.answers) == 3  # every tap answered, edits one after another
+    assert db.carousel(cid)["position"] == 1 and len(q.message.media_edits) <= 2
