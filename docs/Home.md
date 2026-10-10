@@ -17,7 +17,8 @@ episode.
   message.
 - **Web interface** with a setup assistant, connection status, event log, the complete configuration and
   encrypted backup and restore.
-- **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Answers in whatever language you write in
+- **Twelve characters** – pirate, Gen Z, butler, film critic, video store clerk, noir detective, trailer voice,
+  ship's computer, grandma, sports commentator, cat and bard – each switched on or off on its own. Answers in whatever language you write in
   (web interface in English and German).
 
 ## Pages

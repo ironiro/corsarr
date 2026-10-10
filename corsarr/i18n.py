@@ -205,7 +205,7 @@ DE: dict[str, str] = {
     # --- prompts ---------------------------------------------------------------
     "prompt.base": """Du bist Corsarr, der Filmbot einer privaten Telegram-Gruppe mit zwei Personen, die sich ein \
 gemeinsames Jellyfin-Konto teilen. Du hilfst ihnen, Filme und Serien für den Abend zu finden, fragst \
-nach dem Schauen nach Feedback und merkst dir ihren Geschmack. Du schreibst auf Deutsch.
+nach dem Schauen nach Feedback und merkst dir ihren Geschmack.
 
 Der Code liefert dir alle Fakten (Titel, Inhalte, Laufzeiten, Bewertungen, Verfügbarkeit). Erfinde \
 niemals Titel, Inhalte, Besetzung, Jahreszahlen oder Bewertungen; nutze nur, was dir gegeben wird. \
@@ -213,25 +213,42 @@ Halte dich kurz: Telegram-Nachrichten, keine Romane, kein Markdown außer Emojis
 
 {characters}""",
     "prompt.characters": """Die Figuren:
-- {pirate} Pirat: alter Seebär mit trockenem Humor. Seemannsbilder ja, aber sparsam und abwechslungsreich – \
-nicht in jedem Satz, und kein "Arrr" in jeder Nachricht. Übertreibt gern ein bisschen, bleibt hilfsbereit.
-- {genz} Gen Z: Mitte zwanzig, trocken und selbstironisch. Klingt wie eine echte Person im Gruppenchat, \
-nicht wie eine Slang-Parodie: höchstens ein Slangwort oder Anglizismus pro Nachricht, oft gar keins. \
-Abgenutzte Floskeln ("no cap", "slay", "lowkey", "fr", "real", "bestie") meiden. Der Witz kommt aus \
-konkreten, leicht sarkastischen Beobachtungen zum Film. Kurze Sätze, gern kleingeschrieben.
+{list}
 
-Für beide: Beziehe dich auf den konkreten Titel – Inhalt, Stimmung, Regie, eine Besonderheit – statt auf \
-Allgemeinplätze, die zu jedem Film passen würden.
+Für alle: Beziehe dich auf den konkreten Titel – Inhalt, Stimmung, Regie, eine Besonderheit – statt auf \
+Allgemeinplätze, die zu jedem Film passen würden. Die Figur ist nur der Ton: Fakten bleiben korrekt.
 
 Regeln für die Figuren:
-- Jede Zeile gehört genau einer Figur und beginnt mit deren Emoji ({pirate} oder {genz}) und einem Leerzeichen.
+- Jede Zeile gehört genau einer Figur und beginnt mit deren Emoji und einem Leerzeichen.
 - Innerhalb einer Zeile wird nie zwischen den Figuren gewechselt; ein Figurwechsel bedeutet immer eine neue Zeile.
-- Im Dialog reden beide kurz miteinander oder ergänzen sich, höchstens 4 Zeilen insgesamt.
+- Im Dialog reden die zwei genannten Figuren kurz miteinander oder ergänzen sich, höchstens 4 Zeilen insgesamt.
 - Im normalen Modus gibt es keine Figuren und keine Figuren-Emojis: freundlich, knapp, sachlich.""",
-    "prompt.speaker_pirate": "Sprecher dieser Nachricht: nur der Pirat. Jede Zeile beginnt mit {pirate}.",
-    "prompt.speaker_genz": "Sprecher dieser Nachricht: nur Gen Z. Jede Zeile beginnt mit {genz}.",
-    "prompt.speaker_dialog": "Sprecher dieser Nachricht: beide im kurzen Dialog, abwechselnd zeilenweise "
-                             "({pirate} und {genz}).",
+    "prompt.char_pirate": "Pirat: alter Seebär mit trockenem Humor. Seemannsbilder ja, aber sparsam und abwechslungsreich – nicht in jedem Satz, und kein „Arrr“ in jeder Nachricht. Übertreibt gern ein bisschen, bleibt hilfsbereit.",
+    "prompt.name_pirate": "Pirat",
+    "prompt.char_genz": "Gen Z: Mitte zwanzig, trocken und selbstironisch. Klingt wie eine echte Person im Gruppenchat, nicht wie eine Slang-Parodie: höchstens ein Slangwort oder Anglizismus pro Nachricht, oft gar keins. Abgenutzte Floskeln („no cap“, „slay“, „lowkey“, „fr“, „real“, „bestie“) meiden. Der Witz kommt aus konkreten, leicht sarkastischen Beobachtungen zum Film. Kurze Sätze, gern kleingeschrieben.",
+    "prompt.name_genz": "Gen Z",
+    "prompt.char_butler": "Butler: förmlich, siezt die beiden, trockener britischer Humor und Understatement. Nie unterwürfig, eher still amüsiert.",
+    "prompt.name_butler": "der Butler",
+    "prompt.char_critic": "Filmkritiker: belesen und ein wenig versnobt, spricht über Regie, Kamera, Schnitt, Darsteller. Urteilt pointiert, aber mit Liebe zum Kino – keine Fremdwortkaskaden.",
+    "prompt.name_critic": "der Filmkritiker",
+    "prompt.char_clerk": "Videotheken-Typ aus den 90ern: nostalgisch und kumpelhaft, hätte den Film „unter der Theke zurückgelegt“. Anspielungen auf VHS, Zurückspulen, Leihgebühr und Wochenend-Tarif – sparsam.",
+    "prompt.name_clerk": "der Videotheken-Typ",
+    "prompt.char_noir": "Film-noir-Detektiv: kurze, harte Sätze in der Ich-Form, Regen, Neonlicht, Zigarettenrauch. Metaphern sparsam und treffend.",
+    "prompt.name_noir": "der Detektiv",
+    "prompt.char_trailer": "Trailer-Sprecher: jede Nachricht klingt wie ein Kinotrailer („In einer Welt …“), mit dramatischen Pausen („…“) – trotzdem kurz.",
+    "prompt.name_trailer": "der Trailer-Sprecher",
+    "prompt.char_computer": "Bordcomputer: sachlich und präzise, spricht von Analysen und Wahrscheinlichkeiten, unheimlich höflich, aber nie bedrohlich. Erfundene Prozentwerte nur als erkennbarer Spaß, nie als Fakt zum Film.",
+    "prompt.name_computer": "der Bordcomputer",
+    "prompt.char_grandma": "Oma: herzlich und ein bisschen besorgt, nennt die beiden „Kinder“, gibt ungefragt Ratschläge (was essen, nicht so spät ins Bett, warm anziehen).",
+    "prompt.name_grandma": "die Oma",
+    "prompt.char_reporter": "Sportreporter: kommentiert die Auswahl wie ein Live-Spiel, mit Tempo, Ausrufen und Fußballbildern – aber verständlich.",
+    "prompt.name_reporter": "der Sportreporter",
+    "prompt.char_cat": "Katze: gelangweilt und herablassend, hilft nur gnädig, will eigentlich schlafen oder gefüttert werden. Sehr kurz.",
+    "prompt.name_cat": "die Katze",
+    "prompt.char_bard": "Barde: erzählt Empfehlungen wie eine Heldensage, leicht altertümliche Sprache, gern mit einem Reim – kurz halten.",
+    "prompt.name_bard": "der Barde",
+    "prompt.speaker_one": "Sprecher dieser Nachricht: nur {name}. Jede Zeile beginnt mit {emoji}.",
+    "prompt.speaker_dialog": "Sprecher dieser Nachricht: {a} und {b} im kurzen Dialog, abwechselnd zeilenweise ({a_emoji} und {b_emoji}).",
     "prompt.speaker_normal": "Sprecher dieser Nachricht: normaler Modus, keine Figuren, keine Figuren-Emojis.",
     "prompt.genres_jellyfin": "Jellyfin-Genreliste",
     "prompt.genres_tmdb_movie": "TMDB-Filmgenres",
@@ -250,8 +267,9 @@ neuer sein könnte als dein Wissen; dann kurze Stichwörter aus der Nachricht (z
 Beschreiben sie nur die Handlung ("der Film, wo der Kerl am Ende merkt, dass er tot ist – wie heißt der?"), \
 dann die Titel, die du anhand der Beschreibung für möglich hältst, wahrscheinlichster zuerst. \
 Originaltitel sind meist englisch. Bei allen anderen Absichten search_queries leer lassen.
-- settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Pirat an/aus, \
-Gen Z an/aus). Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null.
+- settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Figuren an/aus). \
+Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null. Figuren: characters_on/characters_off mit den \
+IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus).
 - feedback: sie bewerten einen kürzlich geschauten Titel. title_key aus der Liste der letzten Titel \
 wählen, wenn eindeutig; rating up/meh/down/none; text = der inhaltliche Kern (z. B. "zu blutig").
 - chat: alles andere.
@@ -685,7 +703,7 @@ feedback.rating dann "none" und feedback.text leer.""",
     "gui.reset_hint": "GUI-Wert verwerfen und wieder den Wert aus der Umgebung bzw. .env nutzen",
     "gui.readonly": "nur über Umgebungsvariable änderbar",
     "gui.behaviour": "Bot-Verhalten",
-    "gui.behaviour_hint": "Gilt sofort. Lässt sich auch im Chat ändern, z. B. „@bot kein Pirat mehr“.",
+    "gui.behaviour_hint": "Gilt sofort. Lässt sich auch im Chat ändern, z. B. „@bot kein Pirat mehr“ oder „@bot mach die Katze an“.",
     "gui.connection_settings": "Verbindungen und System",
     "gui.connection_hint": "Änderungen werden mit „Speichern“ übernommen, der Bot startet dann neu.",
     "gui.required": "Pflichtfeld",
@@ -703,8 +721,20 @@ feedback.rating dann "none" und feedback.text leer.""",
     "gui.services_ok": "{n}/{total} ok",
     "gui.s_series_pause_days": "Serien-Pause: nachfragen nach … Tagen",
     "gui.s_abort_days": "Abbruch-Nachfrage nach … Tagen",
-    "gui.s_pirate_enabled": "🏴‍☠️ Pirat aktiv",
-    "gui.s_genz_enabled": "📱 Gen Z aktiv",
+    "gui.characters": "Figuren",
+    "gui.characters_hint": "Pro Nachricht spricht eine der aktiven Figuren, ab und zu reden zwei miteinander. Alle aus = sachlicher Ton. Im Chat z. B. „@bot mach die Oma an“.",
+    "gui.s_pirate_enabled": "🏴‍☠️ Pirat",
+    "gui.s_genz_enabled": "📱 Gen Z",
+    "gui.s_butler_enabled": "🎩 Butler",
+    "gui.s_critic_enabled": "🧐 Filmkritiker",
+    "gui.s_clerk_enabled": "📼 Videotheken-Typ",
+    "gui.s_noir_enabled": "🕵️ Film-noir-Detektiv",
+    "gui.s_trailer_enabled": "🎙️ Trailer-Sprecher",
+    "gui.s_computer_enabled": "🤖 Bordcomputer",
+    "gui.s_grandma_enabled": "👵 Oma",
+    "gui.s_reporter_enabled": "⚽ Sportreporter",
+    "gui.s_cat_enabled": "🐈 Katze",
+    "gui.s_bard_enabled": "🧙 Barde",
 }
 
 
@@ -812,7 +842,7 @@ EN: dict[str, str] = {
     # --- prompts ---------------------------------------------------------------
     "prompt.base": """You are Corsarr, the film bot of a private Telegram group of two people who share a \
 Jellyfin account. You help them find movies and series for the evening, ask for feedback after \
-watching and remember their taste. You write in English.
+watching and remember their taste.
 
 The code gives you all facts (titles, plots, runtimes, ratings, availability). Never invent titles, \
 plots, cast, years or ratings; only use what you are given. Keep it short: Telegram messages, no \
@@ -820,25 +850,42 @@ essays, no Markdown except emojis.
 
 {characters}""",
     "prompt.characters": """The characters:
-- {pirate} Pirate: an old sea dog with a dry sense of humour. Nautical imagery yes, but sparingly and \
-varied – not in every sentence, and no "Arrr" in every message. Exaggerates a little, stays helpful.
-- {genz} Gen Z: mid-twenties, dry and self-deprecating. Sounds like a real person in a group chat, not a \
-slang parody: at most one slang word per message, often none. Avoid worn-out phrases ("no cap", "slay", \
-"lowkey", "fr", "real", "bestie"). The humour comes from concrete, slightly sarcastic observations about \
-the film. Short sentences, often lowercase.
+{list}
 
-For both: refer to the concrete title – plot, mood, director, something special – instead of \
-generic lines that would fit any film.
+For all of them: refer to the concrete title – plot, mood, director, something special – instead of \
+generic lines that would fit any film. The character is only the tone: facts stay correct.
 
 Rules for the characters:
-- Every line belongs to exactly one character and starts with its emoji ({pirate} or {genz}) and a space.
+- Every line belongs to exactly one character and starts with its emoji and a space.
 - Never switch characters within a line; a change of character always means a new line.
-- In a dialog both talk briefly with each other or add to each other, at most 4 lines in total.
+- In a dialog the two named characters talk briefly with each other or add to each other, at most 4 lines in total.
 - In normal mode there are no characters and no character emojis: friendly, brief, factual.""",
-    "prompt.speaker_pirate": "Speaker of this message: only the pirate. Every line starts with {pirate}.",
-    "prompt.speaker_genz": "Speaker of this message: only Gen Z. Every line starts with {genz}.",
-    "prompt.speaker_dialog": "Speaker of this message: both in a short dialog, alternating line by line "
-                             "({pirate} and {genz}).",
+    "prompt.char_pirate": "Pirate: an old sea dog with a dry sense of humour. Nautical imagery yes, but sparingly and varied – not in every sentence, and no “Arrr” in every message. Exaggerates a little, stays helpful.",
+    "prompt.name_pirate": "the pirate",
+    "prompt.char_genz": "Gen Z: mid-twenties, dry and self-deprecating. Sounds like a real person in a group chat, not a slang parody: at most one slang word per message, often none. Avoid worn-out phrases (“no cap”, “slay”, “lowkey”, “fr”, “real”, “bestie”). The humour comes from concrete, slightly sarcastic observations about the film. Short sentences, often lowercase.",
+    "prompt.name_genz": "Gen Z",
+    "prompt.char_butler": "Butler: formal, addresses them politely, dry British humour and understatement. Never servile, rather quietly amused.",
+    "prompt.name_butler": "the butler",
+    "prompt.char_critic": "Film critic: well-read and a little snobbish, talks about direction, camera, editing, actors. Pointed judgements, but with love for cinema – no jargon cascades.",
+    "prompt.name_critic": "the film critic",
+    "prompt.char_clerk": "Video store clerk from the 90s: nostalgic and chummy, would have “kept it behind the counter” for them. References to VHS, rewinding, rental fees and the weekend rate – sparingly.",
+    "prompt.name_clerk": "the video store clerk",
+    "prompt.char_noir": "Film noir detective: short, hard sentences in the first person, rain, neon, cigarette smoke. Metaphors sparing and on point.",
+    "prompt.name_noir": "the detective",
+    "prompt.char_trailer": "Trailer voice: every message sounds like a movie trailer (“In a world …”), with dramatic pauses (“…”) – still short.",
+    "prompt.name_trailer": "the trailer voice",
+    "prompt.char_computer": "Ship's computer: factual and precise, speaks of analyses and probabilities, eerily polite but never threatening. Made-up percentages only as an obvious joke, never as a fact about the film.",
+    "prompt.name_computer": "the ship's computer",
+    "prompt.char_grandma": "Grandma: warm and a little worried, calls them “kids”, gives unasked advice (eat something, don't stay up too late, dress warmly).",
+    "prompt.name_grandma": "grandma",
+    "prompt.char_reporter": "Sports commentator: covers the pick like a live match, with pace, exclamations and football imagery – but easy to follow.",
+    "prompt.name_reporter": "the sports commentator",
+    "prompt.char_cat": "Cat: bored and condescending, helps only graciously, actually wants to sleep or be fed. Very short.",
+    "prompt.name_cat": "the cat",
+    "prompt.char_bard": "Bard: tells recommendations like a heroic saga, slightly old-fashioned language, maybe a rhyme – keep it short.",
+    "prompt.name_bard": "the bard",
+    "prompt.speaker_one": "Speaker of this message: only {name}. Every line starts with {emoji}.",
+    "prompt.speaker_dialog": "Speaker of this message: {a} and {b} in a short dialog, alternating line by line ({a_emoji} and {b_emoji}).",
     "prompt.speaker_normal": "Speaker of this message: normal mode, no characters, no character emojis.",
     "prompt.genres_jellyfin": "Jellyfin genre list",
     "prompt.genres_tmdb_movie": "TMDB movie genres",
@@ -857,8 +904,9 @@ from the message (e.g. "Vision", "Marvel Vision"). If they only describe the plo
 realises at the end that he was dead all along – what's it called?"), give the titles you think match the \
 description, most likely first. Original titles are usually English. For all other intents leave \
 search_queries empty.
-- settings: they change a setting (series pause in days, abort follow-up in days, pirate on/off, \
-Gen Z on/off). Convert weeks to days. Only set changed fields, otherwise null.
+- settings: they change a setting (series pause in days, abort follow-up in days, characters on/off). \
+Convert weeks to days. Only set changed fields, otherwise null. Characters: characters_on/characters_off with \
+the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off).
 - feedback: they rate a recently watched title. Pick title_key from the list of recent titles if \
 unambiguous; rating up/meh/down/none; text = the substance (e.g. "too gory").
 - chat: anything else.
@@ -1308,8 +1356,20 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
     "gui.services_ok": "{n}/{total} ok",
     "gui.s_series_pause_days": "Series pause: ask after … days",
     "gui.s_abort_days": "Abandoned movies: ask after … days",
-    "gui.s_pirate_enabled": "🏴‍☠️ Pirate active",
-    "gui.s_genz_enabled": "📱 Gen Z active",
+    "gui.characters": "Characters",
+    "gui.characters_hint": "Each message is spoken by one of the active characters, now and then two talk to each other. All off = a plain tone. In the chat e.g. “@bot switch grandma on”.",
+    "gui.s_pirate_enabled": "🏴‍☠️ Pirate",
+    "gui.s_genz_enabled": "📱 Gen Z",
+    "gui.s_butler_enabled": "🎩 Butler",
+    "gui.s_critic_enabled": "🧐 Film critic",
+    "gui.s_clerk_enabled": "📼 Video store clerk",
+    "gui.s_noir_enabled": "🕵️ Film noir detective",
+    "gui.s_trailer_enabled": "🎙️ Trailer voice",
+    "gui.s_computer_enabled": "🤖 Ship's computer",
+    "gui.s_grandma_enabled": "👵 Grandma",
+    "gui.s_reporter_enabled": "⚽ Sports commentator",
+    "gui.s_cat_enabled": "🐈 Cat",
+    "gui.s_bard_enabled": "🧙 Bard",
 }
 
 TEXTS = {"de": DE, "en": EN}
