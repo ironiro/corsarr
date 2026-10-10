@@ -14,13 +14,38 @@ from .monitor import health
 log = logging.getLogger(__name__)
 
 POSTER_BASE = "https://image.tmdb.org/t/p/w500"
+LOGO_BASE = "https://image.tmdb.org/t/p/w92"
 MIN_VOTES = 200  # TMDB votes – keeps out obscure titles and ones released last week
 
 
+def subscribed(watch_providers: list[dict] | None, region: str, provider_ids: set[int]) -> list[str]:
+    """Names of the subscribed services that include a title in `region`.
+
+    `watch_providers` is the `watchProviders` field of Seerr's movie/tv details: one entry per country
+    (iso_3166_1) with `flatrate` (in the subscription) and `buy` lists. Only flatrate counts – renting or
+    buying is no reason to skip the request."""
+    if not region or not provider_ids:
+        return []
+    entry = next((w for w in watch_providers or [] if w.get("iso_3166_1") == region), None)
+    names: list[str] = []
+    for p in (entry or {}).get("flatrate") or []:
+        if p.get("id") in provider_ids and p.get("name") and p["name"] not in names:
+            names.append(p["name"])
+    return names
+
+
 class Jellyseerr:
-    def __init__(self, url: str, api_key: str):
+    def __init__(self, url: str, api_key: str, track: bool = True):
         self.http = httpx.AsyncClient(base_url=f"{url}/api/v1", timeout=20,
                                       headers={"X-Api-Key": api_key})
+        self.track = track  # False for the GUI's pickers, which may try addresses that were only typed in
+        # Streaming services of the household (STREAMING_REGION / STREAMING_PROVIDERS); set from the
+        # configuration and replaced when it is saved, without restarting the bot. Empty = off.
+        self.streaming_region = ""
+        self.streaming_ids: set[int] = set()
+
+    def set_streaming(self, region: str, provider_ids: set[int]) -> None:
+        self.streaming_region, self.streaming_ids = region, set(provider_ids)
 
     async def close(self) -> None:
         await self.http.aclose()
@@ -32,9 +57,11 @@ class Jellyseerr:
             r = await self.http.get(path, params=params)
             r.raise_for_status()
         except httpx.HTTPError as e:
-            health.track_http("jellyseerr", e)
+            if self.track:
+                health.track_http("jellyseerr", e)
             raise
-        health.track_http("jellyseerr", None)
+        if self.track:
+            health.track_http("jellyseerr", None)
         return r.json()
 
     async def genres(self, media_type: str) -> list[dict]:
@@ -117,8 +144,36 @@ class Jellyseerr:
             videos = d.get("relatedVideos") or []
             trailer = next((v for v in videos if v.get("type") == "Trailer" and v.get("url")), None)
             c.trailer_url = (trailer or {}).get("url")
+            if c.source == "new":  # what is in the library or on its way needs no streaming service
+                c.streaming = subscribed(d.get("watchProviders"), self.streaming_region, self.streaming_ids)
 
         await asyncio.gather(*(one(c) for c in cands))
+
+    async def watch_regions(self) -> list[dict]:
+        """[{code, name}] of the countries TMDB has streaming data for, sorted by name."""
+        data = await self._get("/watchproviders/regions")
+        regions = [{"code": r["iso_3166_1"], "name": r.get("native_name") or r.get("english_name") or r["iso_3166_1"]}
+                   for r in data if r.get("iso_3166_1")]
+        return sorted(regions, key=lambda r: r["name"].casefold())
+
+    async def watch_providers(self, region: str) -> list[dict]:
+        """[{id, name, logo}] of the streaming services in a country – movies and series together,
+        the most popular first (TMDB's display priority)."""
+        movies, tv = await asyncio.gather(self._get("/watchproviders/movies", watchRegion=region),
+                                          self._get("/watchproviders/tv", watchRegion=region))
+        found: dict[int, dict] = {}
+        for p in [*movies, *tv]:
+            if p.get("id") is None or not p.get("name"):
+                continue
+            prio = p.get("displayPriority") if p.get("displayPriority") is not None else 999
+            logo = f"{LOGO_BASE}{p['logoPath']}" if p.get("logoPath") else None
+            seen = found.get(p["id"])
+            if seen is None or prio < seen["prio"]:
+                found[p["id"]] = {"id": p["id"], "name": p["name"], "prio": prio, "logo": logo or (seen or {}).get("logo")}
+            elif not seen["logo"]:
+                seen["logo"] = logo
+        ordered = sorted(found.values(), key=lambda p: (p["prio"], p["name"].casefold()))
+        return [{k: v for k, v in p.items() if k != "prio"} for p in ordered]
 
     async def details(self, media_type: str, tmdb_id: int) -> dict:
         return await self._get(f"/{media_type}/{tmdb_id}")
@@ -149,9 +204,11 @@ class Jellyseerr:
             r = await self.http.post("/request", json=body)
             r.raise_for_status()
         except httpx.HTTPError as e:
-            health.track_http("jellyseerr", e)
+            if self.track:
+                health.track_http("jellyseerr", e)
             raise
-        health.track_http("jellyseerr", None)
+        if self.track:
+            health.track_http("jellyseerr", None)
         return r.json()
 
     async def keywords_for(self, media_type: str, tmdb_id: int) -> tuple[list[str], list[str]]:

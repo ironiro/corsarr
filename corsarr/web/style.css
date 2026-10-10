@@ -834,3 +834,11 @@ details.group > .field:last-child { margin-bottom: 16px; }
 .meter span { display: block; height: 100%; background: var(--ok, #27c24c); }
 .meter span.warn { background: var(--warn, #ffc230); }
 .meter span.error { background: var(--err, #f05050); }
+
+/* --- streaming services: searchable checkbox list (config page and setup assistant) ------------- */
+.streaming > input { margin: 6px 0; }
+.providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0 16px;
+             max-height: 280px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; }
+.providers .switch { padding: 4px 0; }
+.providers .switch[hidden] { display: none; }
+.providers img { border-radius: 4px; flex: none; }

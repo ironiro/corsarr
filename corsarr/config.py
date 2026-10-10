@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,6 +36,8 @@ PROVIDER_FIELDS = {
     "ollama": {"url": "OLLAMA_URL", "model": "OLLAMA_MODEL"},
     "lmstudio": {"url": "LMSTUDIO_URL", "model": "LMSTUDIO_MODEL"},
 }
+# Streaming country when STREAMING_REGION is empty: the one most likely for the interface language.
+REGION_FOR_LANGUAGE = {"de": "DE", "en": "US"}
 
 
 @dataclass(frozen=True)
@@ -44,7 +47,7 @@ class Field:
     required: bool = False
     secret: bool = False
     default: str = ""
-    kind: str = "str"  # 'str' | 'int' | 'number' | 'url' | 'choice'
+    kind: str = "str"  # 'str' | 'int' | 'number' | 'url' | 'choice' | 'region' (country code) | 'ids' (e.g. "8,337")
     choices: tuple[str, ...] = ()
     app_restart: bool = False  # only takes effect after restarting the whole program
     editable: bool = True
@@ -78,6 +81,10 @@ FIELDS: tuple[Field, ...] = (
     Field("JELLYFIN_USER", "jellyfin", required=True),
     Field("JELLYSEERR_URL", "jellyseerr", required=True, kind="url"),
     Field("JELLYSEERR_API_KEY", "jellyseerr", required=True, secret=True),
+    # Streaming services the household subscribes to: cards for new titles name the ones that have it.
+    # Region empty = derived from LANGUAGE; no services = feature off.
+    Field("STREAMING_REGION", "jellyseerr", kind="region", live=True),
+    Field("STREAMING_PROVIDERS", "jellyseerr", kind="ids", live=True),
     Field("WEBHOOK_HOST", "advanced", default="0.0.0.0", app_restart=True),
     Field("WEBHOOK_PORT", "advanced", default="8787", kind="int", app_restart=True),
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
@@ -130,6 +137,11 @@ class Config:
     admin_password = property(lambda self: self.get("ADMIN_PASSWORD"))
     language = property(lambda self: self.get("LANGUAGE"))
     log_level = property(lambda self: self.get("LOG_LEVEL"))
+    streaming_region = property(lambda self: self.get("STREAMING_REGION").upper())
+
+    @property
+    def streaming_ids(self) -> set[int]:
+        return set(parse_ids(self.get("STREAMING_PROVIDERS")) or [])
 
     def _llm(self, kind: str) -> str:
         name = PROVIDER_FIELDS.get(self.llm_provider, {}).get(kind)
@@ -179,7 +191,17 @@ def validate(f: Field, value: str) -> str | None:
         return t("cfg.not_url", name=f.name)
     if f.kind == "choice" and value not in f.choices:
         return t("cfg.not_choice", name=f.name, choices=", ".join(f.choices))
+    if f.kind == "region" and not re.fullmatch(r"[A-Za-z]{2}", value):
+        return t("cfg.not_region", name=f.name, value=value)
+    if f.kind == "ids" and parse_ids(value) is None:
+        return t("cfg.not_ids", name=f.name, value=value)
     return None
+
+
+def parse_ids(value: str) -> list[int] | None:
+    """"8, 337" -> [8, 337]; None when something else than numbers is in the list."""
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    return [int(p) for p in parts] if all(p.isdigit() for p in parts) else None
 
 
 def active(f: Field, values: dict[str, str]) -> bool:
@@ -272,5 +294,7 @@ def load() -> Config:
 
     # Language first, so error messages already come out in it.
     set_language(values["LANGUAGE"])
+    if not values["STREAMING_REGION"]:
+        values["STREAMING_REGION"] = REGION_FOR_LANGUAGE.get(values["LANGUAGE"], "US")
     errors = {f.name: err for f in FIELDS if active(f, values) and (err := validate(f, values[f.name]))}
     return Config(values=values, sources=sources, data_dir=data_dir, errors=errors)
