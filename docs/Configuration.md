@@ -89,6 +89,8 @@ Jellyseerr has been merged into Seerr; Seerr and Overseerr use the same API and 
 | `STREAMING_PROVIDERS` | – | Streaming services you subscribe to, as comma-separated TMDB provider ids (e.g. `8,337` for Netflix and Disney+). In the web interface a checklist of the services in your country, or in the chat: `@bot we have Netflix and Disney+`, `@bot we cancelled Prime`. Cards for new titles then show which of them include the title ([Usage](Usage.md#the-suggestion-card)). Empty = off. Applies immediately. |
 | `STREAMING_REGION` | – | Country whose streaming catalogues count, as a two-letter code (`DE`, `US`, …). Empty = derived from `LANGUAGE` (`de` → `DE`, otherwise `US`). Applies immediately. |
 
+![Streaming country and services in the Jellyseerr / Seerr section](images/streaming.jpg)
+
 ### Webhooks
 
 | Name | Required | Meaning |
