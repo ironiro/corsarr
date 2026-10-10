@@ -16,11 +16,11 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
-from . import arr, persona
+from . import arr, persona, usage
 from .i18n import default_language, language, normalize, switch_language, t, use_language
 from .monitor import health
 from .config import Config
-from .db import DB, now
+from .db import DB, iso, now
 from .feedback import FeedbackService
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
@@ -114,6 +114,22 @@ class CorsarrBot:
         # Start in the group's last language; switches once the message's own language is known.
         with use_language(self.chat_language()):
             await self._handle(msg, text, context)
+
+    async def on_private(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Someone wrote to the bot privately: remember the chat so the admin can pick it in the web
+        interface as ADMIN_CHAT_ID, and tell them how. Nothing else happens in private chats."""
+        msg = update.effective_message
+        user = update.effective_user
+        if not msg or not user:
+            return
+        known = json.loads(self.db.get_state("private_chats") or "[]")
+        known = [c for c in known if c["id"] != msg.chat_id][-4:]  # the last five people
+        known.append({"id": msg.chat_id, "name": user.full_name or user.username or str(user.id), "at": iso(now())})
+        self.db.set_state("private_chats", json.dumps(known, ensure_ascii=False))
+        log.info(t("log.private_chat", name=user.full_name, id=msg.chat_id))
+        with use_language(user.language_code or self.chat_language()):
+            await msg.reply_text(t("bot.private_hello", name=html.escape(user.first_name or ""), id=msg.chat_id),
+                                 parse_mode=ParseMode.HTML)
 
     def chat_language(self) -> str:
         """Language the group last wrote in – used for messages the bot sends on its own."""
@@ -603,6 +619,31 @@ class CorsarrBot:
                 return  # keep them pending, retry next run
             self.db.mark_imports_notified(ids)
             log.info(t("log.notified", text=text))
+
+    @in_chat_language
+    async def job_budget(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Warn once per month at 80 % of the budget and once when it is used up – privately to the admin
+        if ADMIN_CHAT_ID is set, else in the group."""
+        budget = usage.budget_usd(self.cfg)
+        cost = usage.month_cost(self.db) if budget else None
+        if not budget or cost is None:
+            return
+        month = usage.month_start().strftime("%Y-%m")
+        warned = self.db.get_state(f"budget_warned:{month}") or ""
+        if cost >= budget and warned != "100":
+            text, level = t("bot.budget_reached", cost=f"{cost:.2f}", budget=f"{budget:.2f}"), "100"
+        elif cost >= usage.WARN_SHARE * budget and not warned:
+            text, level = t("bot.budget_warning", cost=f"{cost:.2f}", budget=f"{budget:.2f}"), "80"
+        else:
+            return
+        target = int(self.cfg.get("ADMIN_CHAT_ID") or 0) or self.cfg.chat_id
+        try:
+            await self.bot.send_message(target, text)
+        except TelegramError as e:
+            log.warning(t("log.notify_failed", error=e))
+            return
+        self.db.set_state(f"budget_warned:{month}", level)
+        log.info(t("log.budget_warned", level=level, cost=f"{cost:.2f}", budget=f"{budget:.2f}"))
 
     async def job_catch_up(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Imports whose webhook never arrived (Corsarr offline, network) – only with remembered access."""

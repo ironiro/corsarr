@@ -61,7 +61,8 @@ So **$5 of credit is roughly 2,500 suggestion requests.** Typical use – a few 
 question per evening – comes to around 10–20 cents a month, and $5 lasts well over a year. Even heavy use
 (ten requests every day) stays under $1 a month.
 
-Prices can change; the [Claude Console](https://console.anthropic.com/) shows what you actually spent under
+The status page shows the estimated cost of your own use, and an optional monthly budget pauses the bot
+when it is used up ([details](Operations.md#keeping-an-eye-on-costs)). Prices can change; the [Claude Console](https://console.anthropic.com/) shows what you actually spent under
 *Usage*. Set a monthly spend limit there so there are never surprises.
 
 These figures apply to Claude Haiku. Other Claude models cost 20–100 times as much. The untested alternative

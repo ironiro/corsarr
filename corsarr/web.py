@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 from aiohttp import web
 
-from . import arr, backup, config, llm, monitor, setup, updates
+from . import arr, backup, config, llm, monitor, setup, updates, usage
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
@@ -201,6 +201,7 @@ def status_payload(rt: "Runtime") -> dict:
         "language": language(),
         "auth": bool(rt.cfg.admin_password),
         "version": updates.current_version() or "",
+        "usage": usage.summary(rt.db, rt.cfg) if rt.db else None,
         "llm": {"provider": rt.cfg.llm_provider, "model": rt.cfg.model,
                 "name": config.PROVIDER_NAMES.get(rt.cfg.llm_provider, rt.cfg.llm_provider),
                 "recommended": rt.cfg.llm_provider == config.RECOMMENDED_PROVIDER},
@@ -250,6 +251,13 @@ async def api_models(request: web.Request) -> web.Response:
     except Exception as e:  # wrong key, no network, server not running – the form falls back to a text field
         return web.json_response({"models": [], "error": monitor.describe_error(e)})
     return web.json_response({"models": models, "recommended": llm.RECOMMENDED_MODEL, "error": ""})
+
+
+async def api_admin_chats(request: web.Request) -> web.Response:
+    """People who wrote to the bot privately – candidates for ADMIN_CHAT_ID."""
+    rt = _rt(request)
+    chats = json.loads(rt.db.get_state("private_chats") or "[]") if rt.db else []
+    return web.json_response({"chats": list(reversed(chats))})
 
 
 async def api_jellyfin_users(request: web.Request) -> web.Response:
@@ -551,6 +559,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/update", api_update)
     app.router.add_post("/api/options/models", api_models)
+    app.router.add_get("/api/options/admin-chats", api_admin_chats)
     app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
     app.router.add_post("/api/update", api_update_start)
     app.router.add_post("/api/setup/telegram", api_setup_telegram)

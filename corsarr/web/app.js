@@ -240,7 +240,7 @@ function renderStatus() {
           st.status === "error" ? ` · ${T.last_ok}: ${ago(st.last_ok, s.now)}` : ""),
         // Tape window of the video store skin: the state in plain words between the reels
         h("div", { class: "reels", "aria-hidden": "true",
-                   "data-label": { ok: T.deck_ok, error: T.deck_error, disabled: T.status_disabled }[st.status] || T.deck_wait }, h("i"), h("i")));
+                   "data-label": { ok: T.deck_ok, error: T.deck_error, disabled: T.deck_off }[st.status] || T.deck_wait }, h("i"), h("i")));
     }));
 
   // Summary "n/7 ok" – drawn as a ring in the soft skin (green = ok, orange = error, rest = waiting).
@@ -249,11 +249,38 @@ function renderStatus() {
   const ring = h("div", { class: "ring", style: `--ring-ok:${pct(count("ok"))};--ring-err:${pct(count("ok") + count("error"))}` },
     h("span", {}, tr("services_ok", { n: count("ok"), total: names.length })));
 
-  box.replaceChildren(botCard, h("div", { id: "version" }),
+  box.replaceChildren(botCard, h("div", { id: "version" }), usageCard(s.usage),
     h("section", { class: "svc-box" }, h("div", { class: "svc-head" }, h("h2", {}, T.connections), ring), services),
     h("p", { class: "disclaimer" }, T.cost_disclaimer));
   renderVersion();
   if (!updateInfo) loadUpdate(false);
+}
+
+// --- usage and costs -------------------------------------------------------------------------
+function usageCard(u) {
+  if (!u) return null;
+  const num = n => Number(n || 0).toLocaleString();
+  const cost = p => p.cost === null ? T.usage_cost_unknown
+    : p.cost === 0 && p.calls && u.provider !== "claude" ? T.usage_free
+    : tr("usage_cost", { cost: fmtUsd(p.cost) }) + (p.partial ? ` (${T.usage_partial})` : "");
+  const row = (label, p) => [h("dt", {}, label),
+    h("dd", {}, `${tr("usage_calls", { n: num(p.calls) })} · ${tr("usage_tokens", { n: num(p.tokens_in + p.tokens_out) })} · ${cost(p)}`)];
+  const kinds = Object.entries(u.by_kind).sort((a, b) => b[1].calls - a[1].calls);
+  let budget = h("p", { class: "hint" }, T.usage_no_budget);
+  if (u.budget) {
+    const pct = Math.round(100 * (u.budget_share || 0));
+    budget = h("div", { class: "budget" },
+      h("div", { class: "meter", role: "progressbar", "aria-valuenow": pct, "aria-valuemin": 0, "aria-valuemax": 100 },
+        h("span", { class: pct >= 100 ? "error" : pct >= 80 ? "warn" : "ok", style: `width:${Math.min(pct, 100)}%` })),
+      h("span", {}, tr("usage_budget", { cost: fmtUsd(u.month.cost || 0), budget: fmtUsd(u.budget), pct })));
+  }
+  return h("div", { class: "card", id: "usage" },
+    h("div", { class: "row" }, h("h2", {}, T.usage)),
+    h("dl", { class: "facts" }, row(T.usage_today, u.today), row(T.usage_month, u.month), row(T.usage_total, u.total)),
+    budget,
+    kinds.length ? h("details", {}, h("summary", {}, T.usage_kinds), h("ul", { class: "changes" }, kinds.map(([k, v]) =>
+      h("li", {}, `${T["kind_" + k] || k}: ${tr("usage_calls", { n: num(v.calls) })}${v.cost === null ? "" : " · " + tr("usage_cost", { cost: fmtUsd(v.cost) })}`)))) : null,
+    u.provider === "claude" ? h("p", { class: "hint" }, T.usage_hint) : null);
 }
 
 // --- version and updates -----------------------------------------------------------------
@@ -421,7 +448,7 @@ function renderEvents() {
 }
 
 // --- config tab ---------------------------------------------------------------------------
-const GROUPS = ["telegram", "llm", "jellyfin", "jellyseerr", "webhooks", "interface", "advanced"];
+const GROUPS = ["telegram", "llm", "costs", "jellyfin", "jellyseerr", "webhooks", "interface", "advanced"];
 const openGroups = new Set();  // sections the user opened; those with errors open by themselves
 
 async function viewConfig(main) {
@@ -436,6 +463,7 @@ async function viewConfig(main) {
   renderConfig();
   loadOptions("models");
   loadOptions("users");
+  api("/api/options/admin-chats").then(res => { opts.adminChats = res.chats || []; renderConfig(); }).catch(() => {});
 }
 
 // Shown instead of an empty page when the bot cannot be reached (stopped, restarting, network).
@@ -461,7 +489,7 @@ function providerNotice(id) {
 }
 
 // --- pickers: Jellyfin accounts and models, loaded live (also with values not saved yet) ---------
-const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersError: "" };
+const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersError: "", adminChats: [] };
 let savedSetting = null;  // behaviour setting that was just saved – shows "✓ saved" next to it
 
 async function loadOptions(which) {
@@ -487,7 +515,7 @@ async function loadOptions(which) {
 }
 
 const fmtUsd = x => {
-  const v = x >= 0.1 ? x.toFixed(2) : x.toFixed(3);
+  const v = x >= 0.1 ? x.toFixed(2) : x >= 0.01 ? x.toFixed(3) : x.toFixed(4);
   return document.documentElement.lang === "de" ? v.replace(".", ",") : v;
 };
 const modelInfo = id => (opts.models || []).find(m => m.id === id);
@@ -518,6 +546,14 @@ function pickerInput(f, id, current, onInput) {
     if (!current) options.unshift(h("option", { value: "", selected: true }, "–"));
     else if (!ids.includes(current)) options.unshift(h("option", { value: current, selected: true }, current));
     return h("select", { id, onchange: e => { onInput(e); renderConfig(); } }, options);
+  }
+  if (f.name === "ADMIN_CHAT_ID") {
+    // Everyone who wrote to the bot privately; the id itself stays visible for checking
+    const chats = opts.adminChats || [];
+    const options = [h("option", { value: "", selected: !current }, chats.length ? "–" : T.admin_chat_none),
+      ...chats.map(c => h("option", { value: String(c.id), selected: String(c.id) === current }, `${c.name} (${c.id})`))];
+    if (current && !chats.some(c => String(c.id) === current)) options.push(h("option", { value: current, selected: true }, current));
+    return h("select", { id, onchange: onInput }, options);
   }
   if (f.name === "JELLYFIN_USER" && opts.users) {
     const options = opts.users.map(u => h("option", { value: u, selected: u === current }, u));
@@ -594,6 +630,10 @@ function groupSummary(g, fields) {
   const names = { telegram: ["TELEGRAM_CHAT_ID"], llm: ["LLM_PROVIDER", providerInfo(providerId()).fields.model],
                   jellyfin: ["JELLYFIN_URL", "JELLYFIN_USER"], jellyseerr: ["JELLYSEERR_URL"],
                   advanced: ["WEBHOOK_HOST", "WEBHOOK_PORT", "LOG_LEVEL"] }[g] || [];
+  if (g === "costs") {
+    const b = shown("MONTHLY_BUDGET_USD");
+    return b ? tr("usage_cost", { cost: b }) : T.usage_no_budget;
+  }
   return names.map(shown).filter(Boolean).join(" · ");
 }
 

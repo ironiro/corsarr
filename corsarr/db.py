@@ -98,6 +98,18 @@ CREATE TABLE IF NOT EXISTS arr_imports (
     notified INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_arr_pending ON arr_imports(notified, group_key);
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,                  -- UTC
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    kind TEXT NOT NULL,                -- what the call was for: Understanding, Selection, text, …
+    input INTEGER NOT NULL DEFAULT 0,
+    cache_read INTEGER NOT NULL DEFAULT 0,
+    cache_write INTEGER NOT NULL DEFAULT 0,
+    output INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_llm_usage_ts ON llm_usage(ts);
 CREATE TABLE IF NOT EXISTS translations (
     lang TEXT NOT NULL,                -- language without built-in texts, e.g. 'fr'
     key TEXT NOT NULL,                 -- i18n key, e.g. 'bot.btn_accept'
@@ -400,6 +412,21 @@ class DB:
             "SELECT 1 FROM arr_imports WHERE group_key=? AND season IS ? AND episode IS ? AND created_at>=? LIMIT 1",
             (group_key, season, episode, iso(since))).fetchone()
         return row is not None
+
+    # --- language model usage --------------------------------------------------
+    def add_usage(self, provider: str, model: str, kind: str, usage: dict) -> None:
+        self._exec("INSERT INTO llm_usage(ts, provider, model, kind, input, cache_read, cache_write, output) "
+                   "VALUES(?,?,?,?,?,?,?,?)",
+                   (iso(now()), provider, model, kind, usage.get("input", 0), usage.get("cache_read", 0),
+                    usage.get("cache_write", 0), usage.get("output", 0)))
+
+    def usage_since(self, since: datetime | None = None) -> list[dict]:
+        """Token sums per provider, model and kind since `since` (everything when None)."""
+        rows = self.conn.execute(
+            "SELECT provider, model, kind, COUNT(*) AS calls, SUM(input) AS input, SUM(cache_read) AS cache_read, "
+            "SUM(cache_write) AS cache_write, SUM(output) AS output FROM llm_usage WHERE ts >= ? "
+            "GROUP BY provider, model, kind", (iso(since) if since else "",))
+        return [dict(r) for r in rows]
 
     # --- translations of fixed texts ----------------------------------------
     def translations(self) -> list[tuple[str, str, str, str]]:

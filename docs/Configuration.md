@@ -61,6 +61,15 @@ Notes for the untested providers:
 - **OpenAI and Gemini** are paid per use like Claude. Corsarr shows no cost estimate for them – check
   the provider's price list and set a spending limit there.
 
+### Costs and budget
+
+| Name | Required | Meaning |
+| --- | --- | --- |
+| `MONTHLY_BUDGET_USD` | – | Optional. Estimated $ per month; when reached, the bot pauses until the next month (warning at 80 %). Claude only. |
+| `ADMIN_CHAT_ID` | – | Optional. Private chat for budget warnings – write to the bot privately once, then pick yourself in the web interface. Empty = the group. |
+
+See [Keeping an eye on costs](Operations.md#keeping-an-eye-on-costs).
+
 ### Jellyfin
 
 | Name | Required | Meaning |

@@ -44,7 +44,7 @@ class Field:
     required: bool = False
     secret: bool = False
     default: str = ""
-    kind: str = "str"  # 'str' | 'int' | 'url' | 'choice'
+    kind: str = "str"  # 'str' | 'int' | 'number' | 'url' | 'choice'
     choices: tuple[str, ...] = ()
     app_restart: bool = False  # only takes effect after restarting the whole program
     editable: bool = True
@@ -69,6 +69,10 @@ FIELDS: tuple[Field, ...] = (
     Field("LMSTUDIO_URL", "llm", required=True, kind="url", default=DEFAULT_URLS["lmstudio"],
           provider="lmstudio"),
     Field("LMSTUDIO_MODEL", "llm", required=True, provider="lmstudio"),
+    # Optional cost control: estimated $ per month (Claude prices); empty = no budget.
+    Field("MONTHLY_BUDGET_USD", "costs", kind="number", live=True),
+    # Private chat with the admin for budget warnings; empty = warnings go to the group.
+    Field("ADMIN_CHAT_ID", "costs", kind="int", live=True),
     Field("JELLYFIN_URL", "jellyfin", required=True, kind="url"),
     Field("JELLYFIN_API_KEY", "jellyfin", required=True, secret=True),
     Field("JELLYFIN_USER", "jellyfin", required=True),
@@ -165,6 +169,12 @@ def validate(f: Field, value: str) -> str | None:
             int(value)
         except ValueError:
             return t("cfg.not_int", name=f.name, value=value)
+    if f.kind == "number":
+        try:
+            if float(value.replace(",", ".")) < 0:
+                raise ValueError
+        except ValueError:
+            return t("cfg.not_number", name=f.name, value=value)
     if f.kind == "url" and not value.startswith(("http://", "https://")):
         return t("cfg.not_url", name=f.name)
     if f.kind == "choice" and value not in f.choices:

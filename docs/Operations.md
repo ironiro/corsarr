@@ -132,6 +132,15 @@ Upgrading from the old name Filmbot: a `filmbot.db` in the data directory is aut
 
 ## Keeping an eye on costs
 
-The [Claude Console](https://console.anthropic.com/) shows actual costs under *Usage* and the monthly limit
-under *Limits*. The automatic status checks cost nothing; you only pay when the bot interprets or writes
-messages.
+The **Usage** card on the status page shows calls, tokens and the estimated cost for today, this month and
+all time, and what the calls were for. The estimate uses Anthropic's list prices including prompt caching;
+the [Claude Console](https://console.anthropic.com/) shows the real bill under *Usage* and the provider's
+own monthly limit under *Limits*. The automatic status checks cost nothing; you only pay when the bot
+interprets or writes messages.
+
+**Monthly budget** (*Configuration → Costs and budget*): when this month's estimate reaches it, the bot pauses
+like during an outage – it says so once in the group and spends nothing more – until the next month starts
+or you raise the budget (takes effect immediately). At 80 % a warning arrives first. Warnings go to the group,
+or privately to you: write to the bot once in a private chat (e.g. `/start`), then pick yourself as
+*Admin chat for warnings* – Telegram only lets a bot write to people who wrote to it first. The budget only
+works for Claude; for OpenAI and Gemini Corsarr knows no prices. It does not replace the limit at the provider.

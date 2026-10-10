@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from . import backup, config, web
+from . import backup, config, usage, web
 from .bot import CorsarrBot
 from .checks import run_checks
 from .db import DB, DatabaseTooNew
@@ -142,6 +142,8 @@ class Runtime:
         self.jellyfin = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
         self.seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
         self.llm = llm_module.create(cfg)
+        self.llm.on_usage = lambda kind, tokens: self.db.add_usage(self.llm.provider, self.llm.model, kind, tokens)
+        self.llm.budget_reached = lambda: usage.budget_reached(self.db, self.cfg)  # self.cfg: budget changes live
         profiles = ProfileBuilder(self.db, self.jellyfin)
         recommender = Recommender(self.db, self.jellyfin, self.seerr, self.llm, profiles)
         self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles)
@@ -153,6 +155,8 @@ class Runtime:
                .connect_timeout(15).read_timeout(30).write_timeout(30).media_write_timeout(60).build())
         chat = filters.Chat(chat_id=cfg.chat_id)
         app.add_handler(MessageHandler(chat & filters.TEXT, self.corsarr.on_message))
+        # Private messages only serve to learn the admin's chat id (for budget warnings)
+        app.add_handler(MessageHandler(filters.ChatType.PRIVATE, self.corsarr.on_private))
         app.add_handler(CallbackQueryHandler(self.corsarr.on_callback))
         app.add_error_handler(self._on_error)
         self.app = app
@@ -165,6 +169,7 @@ class Runtime:
             app.job_queue.run_repeating(self.corsarr.job_outage, interval=300, first=300)
             app.job_queue.run_repeating(self.corsarr.job_downloads, interval=60, first=10)
             app.job_queue.run_repeating(self.corsarr.job_catch_up, interval=600, first=20)
+            app.job_queue.run_repeating(self.corsarr.job_budget, interval=600, first=60)
             await app.start()
             await app.updater.start_polling(
                 allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=True,
