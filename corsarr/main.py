@@ -44,10 +44,14 @@ def setup_logging(cfg: config.Config) -> None:
     for h in (file_handler, console):
         h.setFormatter(fmt)
         root.addHandler(h)
+    # Updates restart the program often: show the entries from before the restart again.
+    events.restore(cfg.log_dir / "corsarr.log", start_messages=(t("log.process_start"),),
+                   fallback_start=(t("log.web_listening", url=""),))
     root.addHandler(events)
     # Per-request lines of the HTTP libraries (and the GUI's own polling) would flood the event log.
     for noisy in ("httpx", "httpx2", "httpcore", "aiohttp.access", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    log.info(t("log.process_start"))  # where the event log draws the restart divider next time
 
 
 def ensure_webhook_secret(cfg: config.Config) -> config.Config:
