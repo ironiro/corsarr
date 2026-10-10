@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import html
 import ipaddress
 import json
 import logging
@@ -38,6 +39,10 @@ LOGIN_LOCK = web.AppKey("login_lock", asyncio.Lock)
 LOGIN_DELAY = 1.0  # seconds after a failed login; attempts wait for each other, so guessing can't run in parallel
 # Names that always lead into the home network; anything else must be listed in ALLOWED_HOSTS.
 LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".home.arpa", ".internal", ".test")
+# Reachable under any name: the webhooks check their secret, /health tells nothing.
+ANY_HOST_PATHS = ("/jellyfin", "/sonarr", "/radarr", "/health")
+BLOCKED_HOSTS = web.AppKey("blocked_hosts", dict)  # refused name -> last seen, for "allow" on the status page
+BLOCKED_KEPT = 5
 
 
 # --- helpers ---------------------------------------------------------------------
@@ -74,15 +79,25 @@ def _session_valid(request: web.Request) -> bool:
     return True
 
 
+def host_name(host: str) -> str:
+    """The name from a Host header, without port, lower case ("" when unusable)."""
+    name = (host or "").strip().lower()
+    if name.startswith("["):  # [IPv6]:port
+        return name[1:name.find("]")] if "]" in name else ""
+    if name.count(":") == 1:
+        name = name.rsplit(":", 1)[0]
+    try:
+        ipaddress.ip_address(name)
+        return name
+    except ValueError:
+        return name.rstrip(".")
+
+
 def host_allowed(host: str, cfg) -> bool:
     """Whether the Host header names this server: an IP address, localhost, a local domain, the name the
     server listens on or one from ALLOWED_HOSTS. A browser lured to a public name that resolves to a
     private address (DNS rebinding) sends that name – and gets refused."""
-    name = (host or "").strip().lower()
-    if name.startswith("["):  # [IPv6]:port
-        name = name[1:name.find("]")] if "]" in name else ""
-    elif name.count(":") == 1:
-        name = name.rsplit(":", 1)[0]
+    name = host_name(host)
     if not name:
         return False
     try:
@@ -90,7 +105,6 @@ def host_allowed(host: str, cfg) -> bool:
         return True
     except ValueError:
         pass
-    name = name.rstrip(".")
     # Names without a dot (Docker service names like "corsarr", Windows host names) only resolve inside
     # the home network, so they can't be a public name pointed at it.
     if "." not in name or name.endswith(LOCAL_SUFFIXES):
@@ -102,9 +116,8 @@ def host_allowed(host: str, cfg) -> bool:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if not host_allowed(request.host, _rt(request).cfg):
-        log.warning(t("log.host_rejected", host=request.host, remote=_remote(request)))
-        return web.Response(status=403, text="unknown host")
+    if request.path not in ANY_HOST_PATHS and not host_allowed(request.host, _rt(request).cfg):
+        return _host_refused(request)
     path = request.path
     if path.startswith("/api/") and path not in ("/api/login", "/api/i18n"):
         # Login only when ADMIN_PASSWORD is set; by default the GUI is open (meant for the home network).
@@ -114,6 +127,47 @@ async def auth_middleware(request: web.Request, handler):
         if request.method != "GET" and request.headers.get("X-Corsarr") != "1":
             return web.json_response({"error": "missing header"}, status=403)
     return await handler(request)
+
+
+def _host_refused(request: web.Request) -> web.Response:
+    """Refuse a request under an unknown name – and remember the name, so it can be allowed with one click
+    on the status page (opened under an address that works, which a foreign web page can't do)."""
+    name = host_name(request.host)
+    blocked = request.app[BLOCKED_HOSTS]
+    if name not in blocked:
+        log.warning(t("log.host_rejected", host=name or "?", remote=_remote(request)))
+    blocked.pop(name, None)
+    blocked[name] = int(time.time())
+    while len(blocked) > BLOCKED_KEPT:
+        blocked.pop(next(iter(blocked)))
+    if request.path.startswith("/api/"):
+        return web.json_response({"error": "unknown host"}, status=403)
+    page = (f'<!doctype html><html lang="{language()}"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Corsarr</title>'
+            '<body style="font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 16px">'
+            f'<h1>{html.escape(t("gui.host_blocked_title"))}</h1>'
+            f'<p>{html.escape(t("gui.host_blocked_text", host=name or "?"))}</p>'
+            f'<p>{html.escape(t("gui.host_blocked_hint"))}</p></body></html>')
+    return web.Response(status=403, text=page, content_type="text/html")
+
+
+async def api_hosts(request: web.Request) -> web.Response:
+    """Allow a refused name (adds it to ALLOWED_HOSTS) or dismiss it."""
+    rt = _rt(request)
+    body = await _json_body(request, required=True)
+    name = host_name(str(body.get("host") or ""))
+    blocked = request.app[BLOCKED_HOSTS]
+    if name not in blocked:
+        return web.json_response({"error": "unknown host"}, status=400)
+    blocked.pop(name)
+    if body.get("allow"):
+        overrides = config.read_overrides(rt.cfg.data_dir)
+        hosts = [h.strip() for h in rt.cfg.get("ALLOWED_HOSTS").split(",") if h.strip()]
+        overrides["ALLOWED_HOSTS"] = ",".join(hosts + [name])
+        config.write_overrides(rt.cfg.data_dir, overrides)
+        log.info(t("log.host_allowed", host=name))
+        rt.apply_live_config()
+    return web.json_response({"blocked_hosts": list(blocked)})
 
 
 # --- webhook -----------------------------------------------------------------------
@@ -247,7 +301,7 @@ def status_payload(rt: "Runtime") -> dict:
 
 
 async def api_status(request: web.Request) -> web.Response:
-    return web.json_response(status_payload(_rt(request)))
+    return web.json_response({**status_payload(_rt(request)), "blocked_hosts": list(request.app[BLOCKED_HOSTS])})
 
 
 async def api_check(request: web.Request) -> web.Response:
@@ -641,6 +695,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app[SESSIONS] = {}
     app[TASKS] = set()
     app[LOGIN_LOCK] = asyncio.Lock()
+    app[BLOCKED_HOSTS] = {}
     app.on_response_prepare.append(_font_headers)
     app.router.add_post("/jellyfin", jellyfin_webhook)
     app.router.add_post("/sonarr", sonarr_webhook)
@@ -668,6 +723,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/backup", api_backup)
     app.router.add_post("/api/restore", api_restore)
     app.router.add_get("/api/config", api_config)
+    app.router.add_post("/api/hosts", api_hosts)
     app.router.add_put("/api/config", api_config_save)
     app.router.add_put("/api/settings", api_settings_save)
     return app

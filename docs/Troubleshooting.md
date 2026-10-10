@@ -8,11 +8,13 @@ connection, **Events** shows what happened.
 The program is not running (anymore). LXC: `systemctl status corsarr` and `journalctl -u corsarr -n 50`.
 Docker: `docker compose logs --tail 50`. Run manually: is the terminal window still open?
 
-## The web interface or a webhook answers "403 unknown host"
+## The web interface says "Not allowed under this name yet"
 
-Corsarr only answers to IP addresses, `localhost` and local names (`.local`, `.lan`, `.home`, `.internal`,
-`.test`). If you reach it under another name – also in the webhook addresses of Jellyfin, Sonarr or Radarr –
-add that name to `ALLOWED_HOSTS` under *Configuration → Advanced* (several with commas).
+To protect against foreign web pages, the web interface only answers under IP addresses, `localhost`, names
+without a dot and local names (`.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.test`). If you opened it
+under another name: open Corsarr once by its IP address – the status page then shows the blocked name with an
+**Allow** button. You can also list names under `ALLOWED_HOSTS` in *Configuration → Advanced* yourself.
+Webhooks are not affected: they are protected by the webhook secret and work under any name.
 
 ## The bot doesn't start, status "not set up"
 

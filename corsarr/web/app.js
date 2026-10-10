@@ -235,6 +235,15 @@ function renderStatus() {
       h("button", { class: "link", onclick: () => { tab = "config"; showApp(); } }, "→ " + T.tab_config)));
   }
   if (s.state === "error" && s.state_detail) notices.push(h("div", { class: "notice error" }, s.state_detail));
+  for (const host of s.blocked_hosts || []) {
+    const answer = allow => async () => {
+      await api("/api/hosts", { method: "POST", body: { host, allow } });
+      await refreshStatus();
+    };
+    notices.push(h("div", { class: "notice warn" }, tr("host_blocked_notice", { host }), " ",
+      h("button", { class: "link", onclick: answer(true) }, T.host_allow), " · ",
+      h("button", { class: "link", onclick: answer(false) }, T.host_dismiss)));
+  }
 
   const botCard = h("div", { class: "card" },
     h("div", { class: "row" },
