@@ -66,6 +66,7 @@ def make_bot(db, language):
     bot.app = type("App", (), {"bot": FakeTelegram()})()
     bot.speaker = lambda: "normal"
     bot.translations = Translations(db, bot.llm)
+    bot._card_locks, bot._nav_wanted = {}, {}  # set up by __init__, which the test skips
     return bot
 
 

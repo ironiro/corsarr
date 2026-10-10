@@ -8,6 +8,12 @@ connection, **Events** shows what happened.
 The program is not running (anymore). LXC: `systemctl status corsarr` and `journalctl -u corsarr -n 50`.
 Docker: `docker compose logs --tail 50`. Run manually: is the terminal window still open?
 
+## The web interface or a webhook answers "403 unknown host"
+
+Corsarr only answers to IP addresses, `localhost` and local names (`.local`, `.lan`, `.home`, `.internal`,
+`.test`). If you reach it under another name – also in the webhook addresses of Jellyfin, Sonarr or Radarr –
+add that name to `ALLOWED_HOSTS` under *Configuration → Advanced* (several with commas).
+
 ## The bot doesn't start, status "not set up"
 
 Required values are missing – Status lists them. Run the setup assistant (tab *Setup*), or enter them under

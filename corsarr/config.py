@@ -6,12 +6,15 @@ DATA_DIR itself only comes from the environment or .env, since config.json lives
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .i18n import LANGUAGES, set_language, t
+
+log = logging.getLogger(__name__)
 
 OVERRIDES_FILE = "config.json"
 # Format version of config.json. Raise it when a field is renamed or its meaning changes, and teach
@@ -87,6 +90,9 @@ FIELDS: tuple[Field, ...] = (
     Field("STREAMING_PROVIDERS", "jellyseerr", kind="ids", live=True),
     Field("WEBHOOK_HOST", "advanced", default="0.0.0.0", app_restart=True),
     Field("WEBHOOK_PORT", "advanced", default="8787", kind="int", app_restart=True),
+    # Host names under which the web server may be addressed, besides IP addresses, localhost and local
+    # domains (web.auth_middleware). Guards against DNS rebinding.
+    Field("ALLOWED_HOSTS", "advanced", live=True),
     # Not masked: it is made up here and has to be copied into the Jellyfin webhook plugin.
     Field("WEBHOOK_SECRET", "webhooks", required=True),
     # Optional: only saved when chosen in the setup assistant – lets the status page check Sonarr/Radarr
@@ -122,7 +128,6 @@ class Config:
 
     # --- typed accessors for the bot ------------------------------------
     telegram_token = property(lambda self: self.get("TELEGRAM_BOT_TOKEN"))
-    anthropic_api_key = property(lambda self: self.get("ANTHROPIC_API_KEY"))
     llm_provider = property(lambda self: self.get("LLM_PROVIDER") or RECOMMENDED_PROVIDER)
     model = property(lambda self: self._llm("model"))
     llm_api_key = property(lambda self: self._llm("key"))
@@ -147,17 +152,26 @@ class Config:
         name = PROVIDER_FIELDS.get(self.llm_provider, {}).get(kind)
         return self.get(name) if name else ""
 
-    @property
-    def chat_id(self) -> int:
-        return int(self.get("TELEGRAM_CHAT_ID") or 0)
-
-    @property
-    def notify_chat_id(self) -> int:
-        return int(self.get("NOTIFY_CHAT_ID") or 0) or self.chat_id
+    # Bad stored values (a hand-edited config.json, an old backup) must never crash the start: the web
+    # interface has to come up so they can be corrected there. They are listed in errors anyway.
+    chat_id = property(lambda self: self._int("TELEGRAM_CHAT_ID", 0))
+    notify_chat_id = property(lambda self: self._int("NOTIFY_CHAT_ID", 0) or self.chat_id)
 
     @property
     def webhook_port(self) -> int:
-        return int(self.get("WEBHOOK_PORT") or 8787)
+        port = self._int("WEBHOOK_PORT", 8787)
+        if not 0 < port < 65536:
+            log.warning(t("log.config_value_ignored", name="WEBHOOK_PORT", value=port, default=8787))
+            return 8787
+        return port
+
+    def _int(self, name: str, default: int) -> int:
+        value = self.get(name)
+        try:
+            return int(value) if value else default
+        except ValueError:
+            log.warning(t("log.config_value_ignored", name=name, value=value, default=default))
+            return default
 
     @property
     def db_path(self) -> Path:
@@ -166,10 +180,6 @@ class Config:
     @property
     def log_dir(self) -> Path:
         return self.data_dir / "logs"
-
-    @property
-    def overrides_path(self) -> Path:
-        return self.data_dir / OVERRIDES_FILE
 
 
 def validate(f: Field, value: str) -> str | None:
@@ -234,8 +244,8 @@ def _migrate_overrides(data: dict) -> dict:
 
     Files from a newer version are read as they are: unknown fields are ignored, known ones still apply.
     """
-    version = data.get(VERSION_KEY, 1)  # files from before versioning are version 1
-    # A future rename would go here, e.g.:  if version < 2: data["NEW"] = data.pop("OLD", "")
+    # Files from before versioning are version 1. A future rename would go here, e.g.:
+    #   if data.get(VERSION_KEY, 1) < 2: data["NEW"] = data.pop("OLD", "")
     return data
 
 

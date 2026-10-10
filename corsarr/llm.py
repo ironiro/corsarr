@@ -195,15 +195,19 @@ class _Claude:
         except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError,
                 anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
             raise LLMUnavailable(_claude_error(e)) from e
+        except anthropic.NotFoundError as e:  # an unknown model id – every call would fail the same way
+            raise LLMUnavailable(f"model {self.model} not found – check the model name ({_claude_error(e)})") from e
         except anthropic.BadRequestError as e:
             msg = str(e).lower()
             if "usage limit" in msg or "credit balance" in msg or "billing" in msg:
                 raise LLMUnavailable(_claude_error(e)) from e
-            raise
+            raise LLMFailed(_claude_error(e)) from e  # this request was refused (e.g. too long) – not an outage
         except anthropic.APIStatusError as e:
             if e.status_code >= 500:
                 raise LLMUnavailable(_claude_error(e)) from e
-            raise
+            raise LLMFailed(_claude_error(e)) from e
+        except anthropic.APIError as e:  # anything else the SDK raises (e.g. an unexpected response)
+            raise LLMFailed(_claude_error(e)) from e
         health.ok("llm")
 
         u = resp.usage
@@ -271,7 +275,9 @@ class _OpenAICompatible:
             raise LLMUnavailable(describe_error(e)) from e
         if r.status_code == 400:
             raise _BadRequest(_error_text(r))
-        if r.status_code >= 400:  # key, model, quota, server
+        if r.status_code == 404:  # wrong URL, or a model the server doesn't have
+            raise LLMUnavailable(f"HTTP 404: {_error_text(r)} – check the URL and the model name {self.model}")
+        if r.status_code >= 400:  # key, quota, server
             raise LLMUnavailable(f"HTTP {r.status_code}: {_error_text(r)}")
         try:
             return r.json()
@@ -306,19 +312,20 @@ class _OpenAICompatible:
         try:
             choice = data["choices"][0]
             message = choice["message"]
-        except (KeyError, IndexError, TypeError) as e:
+            finish, refusal, content = choice.get("finish_reason"), message.get("refusal"), message.get("content")
+        except (KeyError, IndexError, TypeError, AttributeError) as e:
             raise LLMFailed("unexpected response") from e
         usage = data.get("usage") or {}
         self.last_usage = {"input": usage.get("prompt_tokens") or 0, "cache_read": 0, "cache_write": 0,
                            "output": usage.get("completion_tokens") or 0}
         log.info("LLM %s %s: in=%s out=%s stop=%s", self.provider,
                  output_format.__name__ if output_format else "text", usage.get("prompt_tokens"),
-                 usage.get("completion_tokens"), choice.get("finish_reason"))
-        if choice.get("finish_reason") == "length":
+                 usage.get("completion_tokens"), finish)
+        if finish == "length":
             raise LLMFailed("max_tokens")
-        if message.get("refusal"):
+        if refusal:
             raise LLMFailed("refusal")
-        text = THINK.sub("", message.get("content") or "").strip()
+        text = THINK.sub("", content or "").strip()
         if output_format is None:
             return text
         return _parse_json(text, output_format)

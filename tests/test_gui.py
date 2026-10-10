@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import string
+import time
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -88,6 +89,18 @@ def test_config_precedence_gui_over_env_over_default(env, tmp_path):
     assert cfg.complete
 
 
+def test_bad_stored_numbers_fall_back_to_defaults_instead_of_crashing(env, caplog):
+    env.setenv("WEBHOOK_PORT", "eighty")
+    env.setenv("TELEGRAM_CHAT_ID", "-100x")
+    cfg = config.load()
+    with caplog.at_level("WARNING", logger="corsarr.config"):
+        assert cfg.webhook_port == 8787 and cfg.chat_id == 0 and cfg.notify_chat_id == 0
+    assert "WEBHOOK_PORT" in caplog.text and "TELEGRAM_CHAT_ID" in caplog.text
+    assert {"WEBHOOK_PORT", "TELEGRAM_CHAT_ID"} <= set(cfg.errors)  # still reported as errors
+    env.setenv("WEBHOOK_PORT", "70000")
+    assert config.load().webhook_port == 8787
+
+
 def test_config_reports_missing_and_invalid_without_exiting(env):
     env.delenv("TELEGRAM_BOT_TOKEN")
     env.setenv("TELEGRAM_CHAT_ID", "-100...")
@@ -116,13 +129,18 @@ class FakeRuntime:
         self.restarts += 1
         self.cfg = config.load()
 
+    def apply_live_config(self):  # like Runtime.apply_live_config
+        self.cfg = config.load()
+        if seerr := getattr(self, "seerr", None):
+            seerr.set_streaming(self.cfg.streaming_region, self.cfg.streaming_ids)
+
     async def check(self, manual=False):
         self.checks += 1
 
     async def restore(self, settings, database):
         from corsarr import backup
         self.db.conn.close()
-        backup.restore(self.cfg.data_dir, settings, database)
+        await asyncio.to_thread(backup.restore, self.cfg.data_dir, settings, database)
         self.cfg = config.load()
         self.db = DB(self.cfg.db_path)
 
@@ -176,7 +194,7 @@ def test_config_never_returns_secrets_and_keeps_them_when_empty(env):
         assert r.status == 200 and body["restart"] and rt.restarts == 1
         saved = config.read_overrides(rt.cfg.data_dir)
         assert saved == {"JELLYFIN_USER": "Kino", "LANGUAGE": "en"}  # empty secret = unchanged
-        assert rt.cfg.anthropic_api_key == "sk-test" and i18n.language() == "en"
+        assert rt.cfg.get("ANTHROPIC_API_KEY") == "sk-test" and i18n.language() == "en"
     with_client(test)
 
 
@@ -189,6 +207,108 @@ def test_config_rejects_invalid_values_and_can_reset(env):
         r = await client.put("/api/config", headers=H, json={"reset": ["JELLYFIN_USER"]})
         assert r.status == 200 and config.read_overrides(rt.cfg.data_dir) == {}
         assert rt.cfg.jellyfin_user == "Wohnzimmer"
+    with_client(test)
+
+
+def test_malformed_bodies_are_rejected_not_crashed(env):
+    async def test(client, rt):
+        await login(client)
+        for path, method in (("/api/config", client.put), ("/api/settings", client.put), ("/api/login", client.post)):
+            assert (await method(path, headers=H, data="not json")).status == 400, path
+            assert (await method(path, headers=H, json=[1, 2])).status == 400, path
+        r = await client.put("/api/config", headers=H, json={"values": [1], "reset": "x"})
+        assert r.status == 200  # wrong shapes inside count as "nothing to change"
+    with_client(test)
+
+
+def test_failed_logins_wait_for_each_other(env, monkeypatch):
+    monkeypatch.setattr(web, "LOGIN_DELAY", 0.2)
+
+    async def test(client, rt):
+        started = time.monotonic()
+        results = await asyncio.gather(login(client, "wrong"), login(client, "wrong"), login(client, "wrong"))
+        assert all(r.status == 403 for r in results)
+        assert time.monotonic() - started >= 0.6  # three attempts in parallel still cost three delays
+    with_client(test)
+
+
+def test_unknown_host_names_are_refused(env):
+    assert web.host_allowed("127.0.0.1:8787", config.load()) and web.host_allowed("[::1]:8787", config.load())
+    assert web.host_allowed("::1", config.load()) and web.host_allowed("LOCALHOST", config.load())
+    assert web.host_allowed("nas.lan", config.load()) and web.host_allowed("pi.local:8787", config.load())
+    assert not web.host_allowed("corsarr.example.org", config.load())
+    assert web.host_allowed("corsarr:8787", config.load()) and web.host_allowed("nas.fritz.box", config.load())
+    assert not web.host_allowed("corsarr.example.org.", config.load())
+    assert not web.host_allowed("", config.load()) and not web.host_allowed("[::1", config.load())
+    env.setenv("ALLOWED_HOSTS", "corsarr.example.org, Other.Example.org")
+    assert web.host_allowed("Corsarr.Example.org:8787", config.load())
+    env.setenv("WEBHOOK_HOST", "media.example.org")
+    assert web.host_allowed("media.example.org", config.load())
+
+    async def test(client, rt):
+        bad = {"Host": "evil.example.com"}
+        assert (await client.get("/health", headers=bad)).status == 403
+        assert (await client.get("/", headers=bad)).status == 403
+        assert (await client.get("/api/i18n", headers=bad)).status == 403
+        r = await client.post("/jellyfin", headers={"X-Corsarr-Secret": "hook", **bad}, data="{}")
+        assert r.status == 403 and await r.text() == "unknown host"
+        assert (await client.get("/health")).status == 200  # the test client sends 127.0.0.1:port
+        assert (await client.get("/health", headers={"Host": "corsarr.lan"})).status == 200
+        await login(client)
+        r = await client.put("/api/config", headers=H, json={"values": {"ALLOWED_HOSTS": "evil.example.com"}})
+        assert r.status == 200 and not (await r.json())["restart"]  # applies without a restart
+        assert (await client.get("/health", headers=bad)).status == 200
+    with_client(test)
+
+
+def test_saved_keys_only_go_to_the_saved_address(env, monkeypatch):
+    from corsarr import llm, setup
+    calls = []
+
+    async def fake_models(provider, key, url=""):
+        calls.append(("models", key, url))
+        return []
+    monkeypatch.setattr(llm, "available_models", fake_models)
+
+    async def fake_test(url, key):
+        calls.append(("seerr", key, url))
+        return "ok"
+    monkeypatch.setattr(setup, "test_seerr", fake_test)
+
+    async def fake_arr(kind, url, key, hook):
+        calls.append((kind, key, url))
+        return {}
+    monkeypatch.setattr(setup, "connect_arr", fake_arr)
+    env.setenv("SONARR_URL", "http://sonarr:8989")
+    env.setenv("SONARR_API_KEY", "sonarrkey")
+
+    async def test(client, rt):
+        await login(client)
+        # Only the address typed in: the saved key must not be sent there.
+        r = await (await client.post("/api/options/models", headers=H,
+                                     json={"provider": "claude", "url": "http://attacker:1"})).json()
+        assert r["error"] == i18n.t("gui.options_need_key")
+        r = await (await client.post("/api/options/jellyfin-users", headers=H,
+                                     json={"url": "http://attacker:1"})).json()
+        assert r["users"] == [] and r["error"] == i18n.t("gui.options_need_jellyfin")
+        r = await (await client.post("/api/options/streaming", headers=H, json={"url": "http://attacker:1"})).json()
+        assert r["error"] == i18n.t("gui.options_need_seerr")
+        r = await client.post("/api/setup/test", headers=H,
+                              json={"service": "jellyseerr", "values": {"JELLYSEERR_URL": "http://attacker:1"}})
+        assert r.status == 400 and "JELLYSEERR_API_KEY" in (await r.json())["error"]
+        r = await client.post("/api/setup/arr", headers=H, json={"kind": "sonarr", "url": "http://attacker:1"})
+        assert r.status == 400 and "SONARR_API_KEY" in (await r.json())["error"]
+        assert calls == []
+        # The saved address (also with a trailing slash) or none at all: the saved key is fine.
+        await client.post("/api/options/models", headers=H, json={"provider": "claude"})
+        await client.post("/api/setup/test", headers=H,
+                          json={"service": "jellyseerr", "values": {"JELLYSEERR_URL": "http://seerr:5055/"}})
+        await client.post("/api/setup/arr", headers=H, json={"kind": "sonarr", "url": "http://sonarr:8989/"})
+        # A typed key goes wherever the form says.
+        await client.post("/api/setup/arr", headers=H,
+                          json={"kind": "sonarr", "url": "http://new:8989", "api_key": "typed"})
+        assert calls == [("models", "sk-test", ""), ("seerr", "seerrkey", "http://seerr:5055/"),
+                         ("sonarr", "sonarrkey", "http://sonarr:8989/"), ("sonarr", "typed", "http://new:8989")]
     with_client(test)
 
 

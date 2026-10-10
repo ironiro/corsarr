@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS feedback_requests (
     title TEXT NOT NULL,
     media_type TEXT NOT NULL,
     extra TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL,              -- 'scheduled' | 'pending' | 'sent' | 'answered' | 'expired' | 'cancelled'
+    status TEXT NOT NULL,              -- 'scheduled' | 'pending' | 'sending' | 'sent' | 'answered' | 'expired' | 'cancelled'
     due_at TEXT NOT NULL,
     sent_at TEXT,
     message_id INTEGER,
@@ -224,16 +224,13 @@ class DB:
                    (key, value))
 
     # --- suggestions ----------------------------------------------------
-    def add_suggestion(self, c, message_id: int | None = None) -> int:
+    def add_suggestion(self, c) -> int:
         cur = self._exec(
-            "INSERT INTO suggestions(title_key, title, media_type, source, tmdb_id, jellyfin_id, "
-            "message_id, created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (c.key, c.label, c.media_type, c.source, c.tmdb_id, c.jellyfin_id, message_id, iso(now())),
+            "INSERT INTO suggestions(title_key, title, media_type, source, tmdb_id, jellyfin_id, created_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (c.key, c.label, c.media_type, c.source, c.tmdb_id, c.jellyfin_id, iso(now())),
         )
         return int(cur.lastrowid)
-
-    def set_suggestion_message(self, suggestion_id: int, message_id: int) -> None:
-        self._exec("UPDATE suggestions SET message_id=? WHERE id=?", (message_id, suggestion_id))
 
     def suggestion(self, suggestion_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM suggestions WHERE id=?", (suggestion_id,)).fetchone()
@@ -335,8 +332,13 @@ class DB:
             for r in rows
         ]
 
-    def feedback_keys(self) -> set[str]:
-        return {r["title_key"] for r in self.conn.execute("SELECT title_key FROM feedback")}
+    def feedback_keys(self, min_weight: float = 0.0) -> set[str]:
+        """Titles with a rating – with min_weight=1 only real ones, not the light automatic thumbs down."""
+        return {r["title_key"] for r in self.conn.execute(
+            "SELECT title_key FROM feedback WHERE weight >= ?", (min_weight,))}
+
+    def feedback_for(self, key: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM feedback WHERE title_key=? ORDER BY id", (key,))]
 
     def add_trait(self, direction: str, trait: str, keywords: list[str], feedback_id: int | None,
                   weight: float = 1.0, rater: tuple[int, str] | None = None) -> None:
@@ -377,7 +379,7 @@ class DB:
         marks = ",".join("?" * len(kinds))
         rows = self.conn.execute(
             f"SELECT * FROM feedback_requests WHERE jellyfin_id=? AND kind IN ({marks}) "
-            "AND status IN ('scheduled','pending','sent')",
+            "AND status IN ('scheduled','pending','sending','sent')",
             (jellyfin_id, *kinds),
         )
         return [self._req_dict(r) for r in rows]
@@ -392,6 +394,20 @@ class DB:
 
     def sent_requests(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM feedback_requests WHERE status='sent'")
+        return [self._req_dict(r) for r in rows]
+
+    def claim_request(self, request_id: int) -> bool:
+        """Mark a pending request as being sent – atomically, so the job and the webhook never post the same
+        question twice. False when it is not pending (any more). sent_at holds the claim time until the
+        question is posted (then its real send time) or the claim is given back."""
+        cur = self._exec("UPDATE feedback_requests SET status='sending', sent_at=? WHERE id=? AND status='pending'",
+                         (iso(now()), request_id))
+        return cur.rowcount == 1
+
+    def stuck_sending(self, older_than: datetime) -> list[dict]:
+        """Claims nobody gave back (e.g. a crash while posting) – to be put back to pending."""
+        rows = self.conn.execute("SELECT * FROM feedback_requests WHERE status='sending' AND sent_at < ?",
+                                 (iso(older_than),))
         return [self._req_dict(r) for r in rows]
 
     def recent_requests(self, days: int = 7) -> list[dict]:

@@ -1,12 +1,11 @@
 """Ratings per person: everyone rates, the question stays open until all did, and the taste is per person."""
 import asyncio
-import json
 
 from corsarr.bot import CorsarrBot
 from corsarr.db import now
 from corsarr.feedback import FeedbackService
 from corsarr.models import Candidate
-from corsarr.profile import ProfileBuilder, build_profile
+from corsarr.profile import build_profile
 
 
 class NoTags(FeedbackService):

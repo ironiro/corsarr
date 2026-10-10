@@ -2,6 +2,20 @@
 
 ## Unreleased (beta)
 
+- **Security:** saved API keys are only sent to the saved address (typing another address in a form now needs
+  the key too); the web interface refuses unknown host names (protection against DNS rebinding, new setting
+  `ALLOWED_HOSTS`); the Telegram token and API keys never appear in the log, even at DEBUG; restoring a backup
+  refuses zip bombs and drops invalid settings instead of crashing at the next start; failed logins wait for
+  each other; malformed requests get a 400 instead of an error.
+- When two people rate at the same time, both ratings are kept; the others now get a day from the first rating.
+- A ◀️/▶️ tap while someone decides on the card is no longer lost.
+- A wrong model name or another unexpected error gets a reply in the chat instead of silence.
+- An ignored question after an abandoned movie no longer blocks the question when you finish it later, nor the
+  title in suggestions.
+- A question that cannot be posted is given up after a few tries instead of costing an AI call every 10 minutes;
+  it is no longer posted twice.
+- A stand-in image is no longer remembered as a title's poster; an episode without numbers no longer blocks all
+  download messages; "already requested" in Jellyseerr counts as requested; "Season None" is gone.
 - The Corsarr logo in the web interface (header and login) in the Video store, *arr and Friendly designs; the
   Terminal design stays text only.
 

@@ -45,7 +45,8 @@ class Recommender:
     async def recommend(self, request: str, und: Understanding, speaker: str) -> Recommendation:
         new_only = und.intent == "new_only"
         media_types = list(und.media_types) or ["movie", "tv"]
-        exclude = self.db.rejected_keys() | self.db.feedback_keys() | self.db.accepted_keys()
+        # Rated titles are out – but not for a light automatic thumbs down (ignored abort question) alone.
+        exclude = self.db.rejected_keys() | self.db.feedback_keys(min_weight=1.0) | self.db.accepted_keys()
         recent = self.db.recently_suggested(days=3)
         profile = await self.profiles.get()
         genres = self.llm.requested_genres(und)
