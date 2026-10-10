@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/telegram-chat.jpg" alt="Corsarr in a Telegram group: a suggestion card, feedback after the movie and download notifications" width="860">
+  <img src="docs/images/telegram-chat.jpg" alt="Corsarr in a Telegram group: suggestions with streaming info, looking up a title by its plot, a whole film series, ratings by both of you and bundled downloads" width="900">
   <br><sub>Illustration with made-up names.</sub>
 </p>
 
