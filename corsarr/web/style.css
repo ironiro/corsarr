@@ -799,3 +799,10 @@ details.group > .field:last-child { margin-bottom: 16px; }
 .subhead { margin: 22px 0 4px; font-size: 15px; }
 .characters { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 16px; }
 .characters .switch { margin: 6px 0; }
+
+/* --- usage card: budget meter --------------------------------------------------------------------- */
+.budget { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px; font-size: 13.5px; }
+.meter { flex: 1 1 200px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--ok, #27c24c); }
+.meter span.warn { background: var(--warn, #ffc230); }
+.meter span.error { background: var(--err, #f05050); }

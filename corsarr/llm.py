@@ -42,6 +42,19 @@ MODEL_PRICES = {
     "claude-fable-5": (10.00, 50.00),
 }
 SUGGESTION_COST_HAIKU = 0.002  # $ per suggestion request, measured on real use with Claude Haiku 5.5
+CACHE_READ_FACTOR, CACHE_WRITE_FACTOR = 0.1, 1.25  # prompt caching: share of the input price
+
+
+def usage_cost(provider: str, model: str, usage: dict) -> float | None:
+    """Estimated $ of one call from its token counts; 0 for local models, None when the price is unknown."""
+    if provider in LOCAL_PROVIDERS:
+        return 0.0
+    if provider != "claude" or model not in MODEL_PRICES:
+        return None
+    inp, out = MODEL_PRICES[model]
+    tokens_in = (usage.get("input", 0) + CACHE_READ_FACTOR * usage.get("cache_read", 0)
+                 + CACHE_WRITE_FACTOR * usage.get("cache_write", 0))
+    return (tokens_in * inp + usage.get("output", 0) * out) / 1_000_000
 
 
 def model_cost(model_id: str) -> dict | None:
@@ -73,6 +86,11 @@ async def available_claude_models(api_key: str) -> list[dict]:
 
 class LLMUnavailable(Exception):
     """API unreachable or spend limit reached – the bot goes into outage mode."""
+
+
+class BudgetReached(LLMUnavailable):
+    """The monthly budget set in the web interface is used up – handled like an outage until it is raised
+    or the month is over (the outage probe keeps failing without spending anything)."""
 
 
 class LLMFailed(Exception):
@@ -149,6 +167,7 @@ class TraitResult(BaseModel):
 class _Claude:
     """Anthropic's API through the official SDK – the tested and recommended provider."""
     provider = "claude"
+    last_usage: dict | None = None
 
     def __init__(self, api_key: str, model: str):
         self.client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=2, timeout=45)
@@ -180,6 +199,8 @@ class _Claude:
         health.ok("llm")
 
         u = resp.usage
+        self.last_usage = {"input": u.input_tokens or 0, "cache_read": u.cache_read_input_tokens or 0,
+                           "cache_write": u.cache_creation_input_tokens or 0, "output": u.output_tokens or 0}
         log.info("LLM %s: in=%s cache_read=%s cache_write=%s out=%s stop=%s",
                  output_format.__name__ if output_format else "text", u.input_tokens,
                  u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
@@ -222,6 +243,8 @@ class _OpenAICompatible:
     UNTESTED: developed against the documented API only. Structured answers are requested as a JSON
     schema and, since not every server honours that, the schema is also spelled out in the prompt.
     """
+
+    last_usage: dict | None = None
 
     def __init__(self, provider: str, model: str, api_key: str = "", url: str = ""):
         self.provider, self.model = provider, model
@@ -278,6 +301,8 @@ class _OpenAICompatible:
         except (KeyError, IndexError, TypeError) as e:
             raise LLMFailed("unexpected response") from e
         usage = data.get("usage") or {}
+        self.last_usage = {"input": usage.get("prompt_tokens") or 0, "cache_read": 0, "cache_write": 0,
+                           "output": usage.get("completion_tokens") or 0}
         log.info("LLM %s %s: in=%s out=%s stop=%s", self.provider,
                  output_format.__name__ if output_format else "text", usage.get("prompt_tokens"),
                  usage.get("completion_tokens"), choice.get("finish_reason"))
@@ -381,6 +406,8 @@ class LLM:
 
     def __init__(self, backend):
         self.backend = backend
+        self.on_usage = None         # callback(kind, token counts) after every call – usage tracking
+        self.budget_reached = None   # callback() -> reason text when the monthly budget is used up
         self.genre_context = ""
         self.tmdb_genre_names: dict[int, str] = {}
         # Last lines the characters said; fed back so they don't repeat themselves.
@@ -428,11 +455,18 @@ class LLM:
                 f"{t('prompt.output_language', lang=language())}")
 
     async def _call(self, user: str, output_format: type[BaseModel] | None, max_tokens: int = 2000):
+        if self.budget_reached and (reason := self.budget_reached()):
+            health.error("llm", reason)
+            raise BudgetReached(reason)
+        self.backend.last_usage = None
         try:
             return await self.backend.generate(self._system(), user, output_format, max_tokens)
         except LLMUnavailable as e:
             health.error("llm", str(e))
             raise
+        finally:  # also when the answer was unusable: the tokens were spent anyway
+            if self.backend.last_usage and self.on_usage:
+                self.on_usage(output_format.__name__ if output_format else "text", self.backend.last_usage)
 
     async def ping(self) -> None:
         """A real (tiny) generation – also detects a reached spending limit."""
