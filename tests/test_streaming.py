@@ -202,3 +202,24 @@ def test_chat_sets_adds_and_removes_services(tmp_path, monkeypatch):
     res = asyncio.run(bot._set_streaming(SettingsChange(streaming_add=["Disney+"], streaming_remove=["Prime"])))
     assert bot.cfg.streaming_ids == {8, 337} and res["not_found"] == [] and len(reloads) == 2
     assert config.read_overrides(tmp_path)["STREAMING_PROVIDERS"] == "8,337"  # saved like from the web interface
+
+
+def test_watch_provider_routes_are_called_without_language():
+    """Seerr validates query parameters against its API spec: an unknown "language" gives HTTP 400."""
+    import asyncio
+    import httpx
+    from corsarr.jellyseerr import Jellyseerr
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, dict(request.url.params)))
+        if "language" in request.url.params:
+            return httpx.Response(400, json={"message": "Unknown query parameter 'language'"})
+        if request.url.path.endswith("/regions"):
+            return httpx.Response(200, json=[{"iso_3166_1": "DE", "english_name": "Germany", "native_name": "Deutschland"}])
+        return httpx.Response(200, json=[{"id": 8, "name": "Netflix", "displayPriority": 1}])
+    seerr = Jellyseerr("http://seerr:5055", "k")
+    seerr.http = httpx.AsyncClient(base_url="http://seerr:5055/api/v1", transport=httpx.MockTransport(handler))
+    assert asyncio.run(seerr.watch_regions())[0]["code"] == "DE"
+    assert asyncio.run(seerr.watch_providers("DE"))[0]["name"] == "Netflix"
+    assert all("language" not in params for _, params in seen)
