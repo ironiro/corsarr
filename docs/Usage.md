@@ -24,6 +24,10 @@ Suggestions arrive as **one message to browse through** (plus a short intro):
 - The first **1–2 titles** come from your **library** (watchable right away), the rest are **new** and can be
   requested. If you ask for something new, all titles are new.
 - Every page shows poster, rating, runtime, plot and one line why the title fits.
+- If you chose your streaming services ([`STREAMING_PROVIDERS`](Configuration.md#jellyseerr--seerr)), a new
+  title that one of them includes shows it below the availability line – "📺 On Netflix, Disney+" – so you can
+  watch it there instead of requesting a download. Only services in your subscription count (not rent or buy);
+  the data comes from TMDB via Seerr. The Request button stays – you decide.
 - **◀️ 2 / 6 ▶️** flips between titles – the message is updated in place.
 
 | Button | Effect |

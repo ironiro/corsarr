@@ -205,6 +205,8 @@ class CorsarrBot:
             lines.append(t("bot.pending", kind=kind))
         else:
             lines.append(t("bot.not_available", kind=kind))
+            if c.streaming:  # on a service they already pay for – they may rather watch it there
+                lines.append(t("bot.streaming", providers=html.escape(", ".join(c.streaming[:4]))))
         facts = []
         if c.rating:
             facts.append(t("bot.rating", rating=f"{float(c.rating):.1f}"))

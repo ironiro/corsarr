@@ -464,6 +464,7 @@ class LLM:
                 "source": t("prompt.source_library") if c.source == "library" else t("prompt.source_new"),
                 "genres": c.genres[:5], "keywords": c.keywords[:8],
                 "overview": c.overview[:300], "rating": c.rating, "profile_score": round(c.score, 2),
+                **({"streaming_on": c.streaming} if c.streaming else {}),
             }
             for i, c in enumerate(cands)
         ]

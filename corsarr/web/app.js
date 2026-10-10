@@ -436,6 +436,7 @@ async function viewConfig(main) {
   renderConfig();
   loadOptions("models");
   loadOptions("users");
+  loadOptions("streaming");
 }
 
 // Shown instead of an empty page when the bot cannot be reached (stopped, restarting, network).
@@ -461,7 +462,8 @@ function providerNotice(id) {
 }
 
 // --- pickers: Jellyfin accounts and models, loaded live (also with values not saved yet) ---------
-const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersError: "" };
+const opts = { models: null, modelsError: "", modelsFor: "", users: null, usersError: "",
+               streaming: null, streamingError: "" };
 let savedSetting = null;  // behaviour setting that was just saved – shows "✓ saved" next to it
 
 async function loadOptions(which) {
@@ -470,13 +472,21 @@ async function loadOptions(which) {
     provider = providerId();
     const pf = providerInfo(provider).fields;
     body = { provider, api_key: (pf.key && dirty[pf.key]) || "", url: (pf.url && dirty[pf.url]) || "" };
+  } else if (which === "streaming") {
+    body = { url: dirty.JELLYSEERR_URL || "", api_key: dirty.JELLYSEERR_API_KEY || "", region: fieldValue("STREAMING_REGION") };
   } else {
     body = { url: dirty.JELLYFIN_URL || "", api_key: dirty.JELLYFIN_API_KEY || "" };
   }
+  const path = { models: "models", users: "jellyfin-users", streaming: "streaming" }[which];
   try {
-    const res = await api(`/api/options/${which === "models" ? "models" : "jellyfin-users"}`, { method: "POST", body });
+    const res = await api(`/api/options/${path}`, { method: "POST", body });
     if (which === "models" && provider !== providerId()) return;  // provider changed meanwhile
-    opts[which] = res[which] && res[which].length ? res[which] : null;
+    if (which === "streaming") {
+      if (res.region !== fieldValue("STREAMING_REGION").toUpperCase()) return;  // country changed meanwhile
+      opts.streaming = res.regions && res.regions.length ? res : null;
+    } else {
+      opts[which] = res[which] && res[which].length ? res[which] : null;
+    }
     opts[which + "Error"] = res.error || "";
   } catch (e) {
     opts[which] = null;
@@ -501,6 +511,44 @@ function modelWarning(id) {
   return h("div", { class: c.factor >= 100 ? "notice error" : "notice warn" }, c.factor >= 100 ? T.model_warn_strong + " " : "", text);
 }
 
+// --- streaming services: country select and a checkbox list of its services (stored as ids) ---------
+const idList = v => (v || "").split(",").map(x => x.trim()).filter(Boolean);
+let streamingFilter = "";  // search text above the list – kept when the page is redrawn
+
+function regionSelect(id, data, current, onChange) {
+  const code = (current || "").toUpperCase();
+  const options = data.regions.map(r => h("option", { value: r.code, selected: r.code === code }, `${r.name} (${r.code})`));
+  if (!data.regions.some(r => r.code === code)) options.unshift(h("option", { value: code, selected: true }, code || "–"));
+  return h("select", { id, onchange: onChange }, options);
+}
+
+function providerChecklist(id, data, current, onChange) {
+  const chosen = new Set(idList(current));
+  const known = new Set(data.providers.map(p => String(p.id)));
+  const count = () => chosen.size ? tr("streaming_chosen", { n: chosen.size }) : T.streaming_off;
+  const counter = h("div", { class: "muted" }, count());
+  const toggle = (pid, on) => {
+    on ? chosen.add(pid) : chosen.delete(pid);
+    counter.textContent = count();
+    onChange([...chosen].join(","));
+  };
+  const item = (pid, name, logo) => h("label", { class: "switch", "data-name": name.toLowerCase() },
+    h("input", { type: "checkbox", checked: chosen.has(pid), onchange: e => toggle(pid, e.target.checked) }),
+    logo ? h("img", { src: logo, alt: "", loading: "lazy", width: 20, height: 20 }) : null, name);
+  // Chosen services the country does not list (chosen for another country) stay visible and can be removed.
+  const items = [...[...chosen].filter(pid => !known.has(pid)).map(pid => item(pid, tr("streaming_unknown", { id: pid }))),
+                 ...data.providers.map(p => item(String(p.id), p.name, p.logo))];
+  const list = h("div", { class: "providers", id }, items);
+  const filter = () => {
+    const q = streamingFilter.trim().toLowerCase();
+    for (const el of list.children) el.hidden = !!q && !el.dataset.name.includes(q) && !el.querySelector("input").checked;
+  };
+  const search = h("input", { type: "text", placeholder: T.streaming_filter, spellcheck: "false", autocomplete: "off", value: streamingFilter,
+                              oninput: e => { streamingFilter = e.target.value; filter(); } });
+  filter();
+  return h("div", { class: "streaming" }, counter, search, list);
+}
+
 function pickerInput(f, id, current, onInput) {
   if (f.name === "LLM_PROVIDER") {
     const options = (configData.providers || []).map(p => h("option", { value: p.id, selected: p.id === current },
@@ -518,6 +566,12 @@ function pickerInput(f, id, current, onInput) {
     if (!current) options.unshift(h("option", { value: "", selected: true }, "–"));
     else if (!ids.includes(current)) options.unshift(h("option", { value: current, selected: true }, current));
     return h("select", { id, onchange: e => { onInput(e); renderConfig(); } }, options);
+  }
+  if (f.name === "STREAMING_REGION" && opts.streaming) {
+    return regionSelect(id, opts.streaming, current, e => { onInput(e); renderConfig(); loadOptions("streaming"); });
+  }
+  if (f.name === "STREAMING_PROVIDERS" && opts.streaming) {
+    return providerChecklist(id, opts.streaming, current, v => { dirty[f.name] = v; resets.delete(f.name); updateSaveBar(); });
   }
   if (f.name === "JELLYFIN_USER" && opts.users) {
     const options = opts.users.map(u => h("option", { value: u, selected: u === current }, u));
@@ -584,6 +638,10 @@ function groupSummary(g, fields) {
     if (!f) return "";
     const v = f.name in dirty ? dirty[f.name] : f.value || f.default;
     if (f.secret) return f.is_set || dirty[f.name] ? T.secret_is_set : "";
+    if (f.name === "STREAMING_PROVIDERS") {
+      const n = idList(v).length;
+      return n ? tr("streaming_summary", { n, region: fieldValue("STREAMING_REGION").toUpperCase() }) : "";
+    }
     return choiceLabel(f, v);
   };
   if (g === "interface") {
@@ -592,7 +650,7 @@ function groupSummary(g, fields) {
   }
   if (g === "webhooks") return shown("WEBHOOK_SECRET") ? T.secret_is_set : "";
   const names = { telegram: ["TELEGRAM_CHAT_ID"], llm: ["LLM_PROVIDER", providerInfo(providerId()).fields.model],
-                  jellyfin: ["JELLYFIN_URL", "JELLYFIN_USER"], jellyseerr: ["JELLYSEERR_URL"],
+                  jellyfin: ["JELLYFIN_URL", "JELLYFIN_USER"], jellyseerr: ["JELLYSEERR_URL", "STREAMING_PROVIDERS"],
                   advanced: ["WEBHOOK_HOST", "WEBHOOK_PORT", "LOG_LEVEL"] }[g] || [];
   return names.map(shown).filter(Boolean).join(" · ");
 }
@@ -631,7 +689,8 @@ function fieldRow(f) {
   // The pickers depend on these – reload them once a new address or key has been typed.
   const pf = providerInfo(providerId()).fields;
   const reloads = f.name === pf.key || f.name === pf.url ? "models"
-    : { JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users" }[f.name];
+    : { JELLYFIN_URL: "users", JELLYFIN_API_KEY: "users", JELLYSEERR_URL: "streaming", JELLYSEERR_API_KEY: "streaming",
+        STREAMING_REGION: "streaming" }[f.name];
   if (!f.editable) {
     input = h("input", { type: "text", id, value: f.value, disabled: true });
   } else if ((input = pickerInput(f, id, current, onInput))) {
@@ -656,8 +715,9 @@ function fieldRow(f) {
       resets.add(f.name); delete dirty[f.name]; renderConfig();
     } }, T.reset_short));
   } else if (f.source === "env") info.push(h("span", { class: "tag", title: T.from_env_title }, T.env_tag));
-  const pickerError = { [pf.model]: opts.modelsError, JELLYFIN_USER: opts.usersError }[f.name];
-  if (pickerError && input.tagName !== "SELECT") info.push(tr("options_fallback", { error: pickerError }));
+  const pickerError = { [pf.model]: opts.modelsError, JELLYFIN_USER: opts.usersError,
+                        STREAMING_PROVIDERS: opts.streamingError }[f.name];
+  if (pickerError && input.tagName === "INPUT") info.push(tr("options_fallback", { error: pickerError }));
   return h("div", { class: "field" },
     // The technical name (for environment variables and the docs) only shows on hover.
     h("label", { for: id, title: f.name }, T["f_" + f.name] || f.name,
@@ -902,11 +962,36 @@ function stepJellyfin() {
   return { body, ready: !!wiz.result.jellyfin, ok: wiz.result.jellyfin, save: names };
 }
 
+// Optional part of the Seerr step: the streaming services they subscribe to (see providerChecklist).
+async function loadWizStreaming() {
+  const res = await wizCall("/api/options/streaming", {
+    url: wiz.values.JELLYSEERR_URL || "", api_key: wiz.values.JELLYSEERR_API_KEY || "", region: wizValue("STREAMING_REGION") });
+  if (!res) return;
+  wiz.streaming = res.regions && res.regions.length ? res : null;
+  if (res.error) wiz.error = tr("options_fallback", { error: res.error });
+  renderSetup();
+}
+
 function stepSeerr() {
   const names = ["JELLYSEERR_URL", "JELLYSEERR_API_KEY"];
   const body = [h("p", {}, T.wiz_seerr_intro), wizInput("JELLYSEERR_URL"), wizInput("JELLYSEERR_API_KEY"),
     h("button", { class: "btn", disabled: wiz.busy, onclick: () => wizTest("jellyseerr", names) }, T.wiz_test)];
-  return { body, ready: !!wiz.result.jellyseerr, ok: wiz.result.jellyseerr, save: names };
+  if (wiz.result.jellyseerr) {
+    const label = name => h("label", { for: "w_" + name }, T["f_" + name], h("span", { class: "name" }, name));
+    body.push(h("h3", {}, T.wiz_streaming_title), h("p", { class: "hint" }, T.wiz_streaming_intro));
+    if (!wiz.streaming) {
+      body.push(h("button", { class: "btn", disabled: wiz.busy, onclick: loadWizStreaming }, T.wiz_streaming_load));
+    } else {
+      body.push(h("div", { class: "field" }, label("STREAMING_REGION"),
+          regionSelect("w_STREAMING_REGION", wiz.streaming, wizValue("STREAMING_REGION"), e => {
+            wiz.values.STREAMING_REGION = e.target.value; loadWizStreaming(); })),
+        h("div", { class: "field" }, label("STREAMING_PROVIDERS"),
+          providerChecklist("w_STREAMING_PROVIDERS", wiz.streaming, wizValue("STREAMING_PROVIDERS"), v => {
+            wiz.values.STREAMING_PROVIDERS = v; })));
+    }
+  }
+  return { body, ready: !!wiz.result.jellyseerr, ok: wiz.result.jellyseerr,
+           save: [...names, "STREAMING_REGION", "STREAMING_PROVIDERS"] };
 }
 
 function hookState(service) {
