@@ -145,6 +145,7 @@ class Runtime:
         log.info(t("log.bot_starting"))
         self.jellyfin = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
         self.seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
+        self.seerr.set_streaming(cfg.streaming_region, cfg.streaming_ids)
         self.llm = llm_module.create(cfg)
         self.llm.on_usage = lambda kind, tokens: self.db.add_usage(self.llm.provider, self.llm.model, kind, tokens)
         self.llm.budget_reached = lambda: usage.budget_reached(self.db, self.cfg)  # self.cfg: budget changes live

@@ -140,12 +140,13 @@ class CorsarrBot:
     # --- the people in the group (for ratings per person) -------------------------
     def _note_member(self, user) -> None:
         """Remember who is in the group – everyone who writes to the bot or presses a button."""
-        if not user or getattr(user, "is_bot", False):
+        uid = getattr(user, "id", None)
+        if uid is None or getattr(user, "is_bot", False):
             return
         members = json.loads(self.db.get_state("members") or "{}")
-        name = user.first_name or user.full_name or str(user.id)
-        if members.get(str(user.id), {}).get("name") != name or not members.get(str(user.id)):
-            members[str(user.id)] = {"name": name, "seen": iso(now())}
+        name = getattr(user, "first_name", None) or getattr(user, "full_name", None) or str(uid)
+        if members.get(str(uid), {}).get("name") != name:
+            members[str(uid)] = {"name": name, "seen": iso(now())}
             self.db.set_state("members", json.dumps(members, ensure_ascii=False))
 
     def members(self) -> dict[str, str]:
@@ -253,6 +254,8 @@ class CorsarrBot:
             lines.append(t("bot.pending", kind=kind))
         else:
             lines.append(t("bot.not_available", kind=kind))
+            if c.streaming:  # on a service they already pay for – they may rather watch it there
+                lines.append(t("bot.streaming", providers=html.escape(", ".join(c.streaming[:4]))))
         facts = []
         if c.rating:
             facts.append(t("bot.rating", rating=f"{float(c.rating):.1f}"))

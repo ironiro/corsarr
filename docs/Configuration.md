@@ -86,6 +86,8 @@ Jellyseerr has been merged into Seerr; Seerr and Overseerr use the same API and 
 | --- | --- | --- |
 | `JELLYSEERR_URL` | yes | e.g. `http://192.168.1.21:5055` |
 | `JELLYSEERR_API_KEY` | yes | Settings → General → API Key |
+| `STREAMING_PROVIDERS` | – | Streaming services you subscribe to, as comma-separated TMDB provider ids (e.g. `8,337` for Netflix and Disney+). In the web interface a checklist of the services in your country. Cards for new titles then show which of them include the title ([Usage](Usage.md#the-suggestion-card)). Empty = off. Applies immediately. |
+| `STREAMING_REGION` | – | Country whose streaming catalogues count, as a two-letter code (`DE`, `US`, …). Empty = derived from `LANGUAGE` (`de` → `DE`, otherwise `US`). Applies immediately. |
 
 ### Webhooks
 

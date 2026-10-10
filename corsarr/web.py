@@ -17,6 +17,7 @@ from . import arr, backup, config, llm, monitor, setup, updates, usage
 from .bot import SETTING_LIMITS
 from .db import DEFAULT_SETTINGS
 from .i18n import gui_texts, language, t
+from .jellyseerr import Jellyseerr
 from .monitor import events, health
 
 if TYPE_CHECKING:
@@ -279,6 +280,28 @@ async def api_jellyfin_users(request: web.Request) -> web.Response:
     return web.json_response({"users": users, "error": ""})
 
 
+async def api_streaming(request: web.Request) -> web.Response:
+    """Countries and streaming services for the pickers, through Seerr (TMDB data). Uses the address,
+    key and country typed into the form, else the saved ones."""
+    rt = _rt(request)
+    body = await _json_body(request)
+    url = str(body.get("url") or rt.cfg.jellyseerr_url).rstrip("/")
+    key = str(body.get("api_key") or rt.cfg.jellyseerr_api_key)
+    region = str(body.get("region") or rt.cfg.streaming_region).upper()
+    if not url or not key:
+        return web.json_response({"regions": [], "providers": [], "region": region,
+                                  "error": t("gui.options_need_seerr")})
+    seerr = Jellyseerr(url, key, track=False)
+    try:
+        regions, providers = await asyncio.gather(seerr.watch_regions(), seerr.watch_providers(region))
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:  # the form falls back to text fields
+        return web.json_response({"regions": [], "providers": [], "region": region,
+                                  "error": monitor.describe_error(e)})
+    finally:
+        await seerr.close()
+    return web.json_response({"regions": regions, "providers": providers, "region": region, "error": ""})
+
+
 async def api_update(request: web.Request) -> web.Response:
     """Installed vs. latest version; ?force=1 skips the cache (button "Check for updates")."""
     rt = _rt(request)
@@ -506,6 +529,8 @@ async def api_config_save(request: web.Request) -> web.Response:
         await rt.restart()
     else:
         rt.cfg = config.load()
+        if seerr := getattr(rt, "seerr", None):  # streaming services apply to the next cards right away
+            seerr.set_streaming(rt.cfg.streaming_region, rt.cfg.streaming_ids)
     return web.json_response({"restart": needs_restart, "app_restart": app_restart, **config_payload(rt)})
 
 
@@ -570,6 +595,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app.router.add_post("/api/options/models", api_models)
     app.router.add_get("/api/options/admin-chats", api_admin_chats)
     app.router.add_post("/api/options/jellyfin-users", api_jellyfin_users)
+    app.router.add_post("/api/options/streaming", api_streaming)
     app.router.add_post("/api/update", api_update_start)
     app.router.add_post("/api/setup/telegram", api_setup_telegram)
     app.router.add_post("/api/setup/test", api_setup_test)
