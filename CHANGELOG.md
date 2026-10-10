@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (beta)
+## v1.0.4
 
 - **Security:** saved API keys are only sent to the saved address (typing another address in a form now needs
   the key too); the web interface only answers under known names (protection against DNS rebinding) – another
