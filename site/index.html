@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corsarr – your movie night crew on Telegram</title>
+<meta name="description" content="A self-hosted Telegram bot for movie night: suggestions from your Jellyfin library and Jellyseerr/Seerr, feedback after watching, Sonarr/Radarr download notifications and a web interface.">
+<meta property="og:title" content="Corsarr – your movie night crew on Telegram">
+<meta property="og:description" content="Suggestions from Jellyfin and Seerr, feedback after watching, Sonarr/Radarr notifications – self-hosted.">
+<meta property="og:image" content="https://ironiro.github.io/corsarr/img/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<style>
+  @font-face { font-family: "VT323"; src: url("fonts/vt323-latin-400-normal.woff2") format("woff2"); font-display: swap; }
+  :root {
+    --bg: #14082a; --bg-2: #1d0d38; --surface: #241243; --line: #3c2566;
+    --text: #f0e6ff; --muted: #b9a8d8; --pink: #ff3ec9; --cyan: #2ef2ff; --yellow: #ffe66d;
+    --mono: "VT323", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background-image: radial-gradient(ellipse at 50% -10%, #3a1460 0%, transparent 60%);
+  }
+  a { color: var(--cyan); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 12px; padding: 18px 0; }
+  .top img { width: 34px; height: 34px; }
+  .top .name { font: 400 28px/1 var(--mono); letter-spacing: 2px;
+               background: linear-gradient(180deg, var(--yellow), var(--pink)); -webkit-background-clip: text; color: transparent; }
+  .top nav { margin-left: auto; display: flex; gap: 22px; flex-wrap: wrap; }
+  .top nav a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 15px; }
+  .top nav a:hover { color: var(--text); }
+
+  /* hero */
+  .hero { text-align: center; padding: 56px 0 40px; }
+  .hero img.logo { width: 132px; height: 132px; filter: drop-shadow(0 0 36px rgba(255, 62, 201, .45)); }
+  .hero h1 { margin: 18px 0 8px; font: 400 clamp(64px, 12vw, 112px)/0.9 var(--mono); letter-spacing: 6px;
+             background: linear-gradient(180deg, var(--yellow), var(--pink)); -webkit-background-clip: text; color: transparent; }
+  .hero p.tag { margin: 0 auto; max-width: 660px; font-size: clamp(18px, 2.6vw, 22px); color: var(--muted); }
+  .buttons { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin: 30px 0 10px; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 4px; text-decoration: none; font-weight: 700;
+         border: 1px solid var(--cyan); color: var(--cyan); }
+  .btn.primary { background: var(--cyan); color: var(--bg); box-shadow: 0 0 20px rgba(46, 242, 255, .45); }
+  .btn:hover { filter: brightness(1.1); }
+  .badges { margin-top: 18px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .shot { margin: 34px auto 0; max-width: 800px; border-radius: 12px; overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, .5), 0 0 0 1px var(--line); }
+  .shot img { display: block; width: 100%; height: auto; }
+  .note { color: var(--muted); font-size: 13px; text-align: center; margin-top: 8px; }
+
+  /* sections */
+  section { padding: 56px 0; }
+  h2 { font: 400 40px/1 var(--mono); letter-spacing: 2px; color: var(--yellow); margin: 0 0 26px; text-align: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px 20px 16px; }
+  .card .ico { font-size: 28px; }
+  .card h3 { margin: 8px 0 6px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card code, .say { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; color: var(--cyan); }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  @media (max-width: 700px) { .gallery { grid-template-columns: 1fr; } }
+  .gallery figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .gallery img { display: block; width: 100%; height: 280px; object-fit: cover; object-position: top; }
+  .gallery figcaption { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+  pre { margin: 10px 0 0; padding: 14px; background: #0c0518; border: 1px solid var(--line); border-radius: 8px;
+        white-space: pre-wrap; word-break: break-all; font-size: 13.5px; color: #9df29d; }
+  .warn { margin-top: 26px; border-left: 4px solid var(--yellow); background: rgba(255, 230, 109, .06);
+          padding: 12px 16px; border-radius: 4px; color: var(--muted); font-size: 14.5px; }
+
+  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; gap: 10px 24px; flex-wrap: wrap; justify-content: space-between; }
+  footer a { color: var(--muted); }
+
+  /* the neon floor */
+  .floor { height: 140px; opacity: .3; pointer-events: none;
+           background: repeating-linear-gradient(90deg, var(--pink) 0 1px, transparent 1px 64px),
+                       repeating-linear-gradient(0deg, var(--pink) 0 1px, transparent 1px 32px);
+           transform: perspective(300px) rotateX(58deg); transform-origin: bottom; margin-top: -20px; }
+  @media (max-width: 600px) { .top nav { display: none; } section { padding: 40px 0; } }
+</style>
+</head>
+<body>
+  <header class="wrap top">
+    <img src="img/logo.svg" alt="">
+    <span class="name">CORSARR</span>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/ironiro/corsarr/wiki">Docs</a>
+      <a href="https://github.com/ironiro/corsarr">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="wrap hero">
+      <img class="logo" src="img/logo.svg" alt="Corsarr logo">
+      <h1>CORSARR</h1>
+      <p class="tag">Your movie night crew on Telegram. Picks films and series from your Jellyfin library and beyond,
+        asks how you liked them, learns your taste – and tells you when Sonarr and Radarr are done.</p>
+      <div class="buttons">
+        <a class="btn primary" href="#install">Get started</a>
+        <a class="btn" href="https://github.com/ironiro/corsarr/wiki">Documentation</a>
+        <a class="btn" href="https://github.com/ironiro/corsarr">View on GitHub</a>
+      </div>
+      <div class="badges">
+        <img src="https://img.shields.io/github/v/tag/ironiro/corsarr?sort=semver&filter=!*beta*&color=ff3ec9&label=release" alt="Latest release">
+        <img src="https://img.shields.io/github/license/ironiro/corsarr?color=7a43b6" alt="GPL-3.0 licence">
+        <img src="https://img.shields.io/badge/self--hosted-Proxmox%20%C2%B7%20Docker-2ef2ff" alt="Self-hosted">
+      </div>
+      <div class="shot"><img src="img/telegram-chat.jpg" alt="Corsarr in a Telegram group: a suggestion card, feedback after the movie and download notifications" width="800" height="640"></div>
+      <div class="note">Illustration with made-up names.</div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>WHAT IT DOES</h2>
+        <div class="grid">
+          <div class="card"><div class="ico">🎬</div><h3>Suggestions that fit</h3>
+            <p><span class="say">@bot find us a thriller, max 2 hours</span> → one browsable card: your library first,
+              then new titles, each with poster, reason and trailer.</p></div>
+          <div class="card"><div class="ico">🔎</div><h3>Look it up</h3>
+            <p>By name or by plot – <span class="say">"the film where the guy was dead all along?"</span> – and whole
+              film series with one button.</p></div>
+          <div class="card"><div class="ico">📺</div><h3>Where to stream it</h3>
+            <p>Cards for new titles name the streaming services you subscribe to – watch there or request it.</p></div>
+          <div class="card"><div class="ico">❤️</div><h3>Learns your taste</h3>
+            <p>Asks after the film; each of you rates for yourself, and suggestions respect both tastes.</p></div>
+          <div class="card"><div class="ico">📦</div><h3>Downloads without spam</h3>
+            <p>Sonarr and Radarr imports bundled – a whole season is one message, missed webhooks are caught up.</p></div>
+          <div class="card"><div class="ico">🏴‍☠️</div><h3>Personality</h3>
+            <p>Twelve characters from pirate to grandma and cat – and it answers in whatever language you write in.</p></div>
+          <div class="card"><div class="ico">🖥️</div><h3>Web interface</h3>
+            <p>Setup assistant, status checks, usage and cost with a monthly budget, backups, update channels, four designs.</p></div>
+          <div class="card"><div class="ico">🔒</div><h3>Yours</h3>
+            <p>Self-hosted, open source (GPL-3.0), no telemetry. Facts come from your servers – the model only picks and phrases.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshots">
+      <div class="wrap">
+        <h2>THE WEB INTERFACE</h2>
+        <div class="gallery">
+          <figure><a href="img/status.jpg"><img src="img/status.jpg" alt="Status page" loading="lazy"></a>
+            <figcaption>Status, usage and estimated cost</figcaption></figure>
+          <figure><a href="img/setup.jpg"><img src="img/setup.jpg" alt="Setup assistant" loading="lazy"></a>
+            <figcaption>Setup assistant – webhooks in one click</figcaption></figure>
+          <figure><a href="img/configuration.jpg"><img src="img/configuration.jpg" alt="Configuration" loading="lazy"></a>
+            <figcaption>Configuration and characters</figcaption></figure>
+          <figure><a href="img/streaming.jpg"><img src="img/streaming.jpg" alt="Streaming services" loading="lazy"></a>
+            <figcaption>Your streaming services</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="wrap">
+        <h2>GET STARTED</h2>
+        <div class="steps">
+          <div class="card"><h3>Proxmox (recommended)</h3>
+            <p>In the Proxmox host shell – creates a small Debian container and installs Corsarr:</p>
+            <pre>bash -c "$(curl -fsSL https://raw.githubusercontent.com/ironiro/corsarr/main/deploy/proxmox.sh)"</pre></div>
+          <div class="card"><h3>Docker</h3>
+            <p>Images for amd64 and arm64 on <code>ghcr.io/ironiro/corsarr</code>:</p>
+            <pre>curl -fsSLO https://raw.githubusercontent.com/ironiro/corsarr/main/docker-compose.yml
+docker compose up -d</pre></div>
+        </div>
+        <p style="text-align:center;margin-top:24px">Then open <code>http://&lt;ip&gt;:8787/</code> – the setup assistant walks you
+          through Telegram, Claude, Jellyfin, Jellyseerr/Seerr and the webhooks.
+          <a href="https://github.com/ironiro/corsarr/wiki/Installation">More ways to install →</a></p>
+        <div class="warn"><b>Costs:</b> Corsarr is free; the language model is billed by its provider. With Claude Haiku one
+          suggestion costs about $0.002, so $5 of credit lasts well over a year. You alone pay for the API usage – no
+          liability whatsoever is accepted for API costs. Set a spending limit with your provider. Claude is recommended
+          and tested; OpenAI, Gemini, Ollama and LM Studio are untested.</div>
+      </div>
+    </section>
+  </main>
+
+  <div class="floor" aria-hidden="true"></div>
+  <footer>
+    <div class="wrap">
+      <span>Corsarr · <a href="https://github.com/ironiro/corsarr/blob/main/LICENSE">GPL-3.0 licence</a></span>
+      <span><a href="https://github.com/ironiro/corsarr">GitHub</a> · <a href="https://github.com/ironiro/corsarr/wiki">Docs</a> ·
+        <a href="https://github.com/ironiro/corsarr/releases">Releases</a> ·
+        <a href="https://github.com/ironiro/corsarr/issues/new/choose">Report a problem</a></span>
+      <span>Built on Jellyfin, Seerr, Sonarr, Radarr, TMDB and Claude. Not affiliated with any of them.</span>
+    </div>
+  </footer>
+</body>
+</html>

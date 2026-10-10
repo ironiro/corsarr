@@ -107,3 +107,9 @@ Every push to `main` builds `:edge`.
 The [wiki](https://github.com/ironiro/corsarr/wiki) is generated from `docs/` – edit the files there, not the wiki.
 `docs/publish-wiki.sh` copies the pages and screenshots into the wiki repository and turns `Page.md` links into
 wiki links.
+
+## The website
+
+`site/` is the project website on GitHub Pages (https://ironiro.github.io/corsarr/), published by
+`.github/workflows/pages.yml` whenever something in `site/` changes. It is plain HTML and CSS; its images are copies
+of `assets/logo.svg` and screenshots from `docs/images/` – copy them again when the screenshots change.
