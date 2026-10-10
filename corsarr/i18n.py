@@ -180,9 +180,12 @@ DE: dict[str, str] = {
                             "Nenne die änderbaren Einstellungen.",
     "sit.settings_changed": "Bestätige die Änderung der Einstellungen (dauerhaft gespeichert). Nenne die "
                             "neuen Werte verständlich (Tage ggf. als Wochen).",
-    "sit.chat": "Jemand hat dich angesprochen, ohne Vorschläge, Feedback oder eine Einstellung zu wollen. "
-                "Antworte kurz und passend; erwähne bei Bedarf, was du kannst (Vorschläge nach Genre, "
-                "'such nach Neuem', Einstellungen wie Serien-Pause oder Figuren an/aus).",
+    "sit.chat": "Jemand hat dich angesprochen, ohne Vorschläge, Feedback oder eine Einstellung zu wollen. Antworte "
+                "kurz und passend; erwähne bei Bedarf, was du kannst: Vorschläge nach Genre, Stimmung oder Länge, "
+                "einen bestimmten Titel nachschlagen (auch nach einer Beschreibung der Handlung), alle Teile einer "
+                "Filmreihe anfragen, eure Streaming-Dienste merken, 12 Figuren an- und ausschalten (Pirat, Gen Z, "
+                "Butler, Filmkritiker, Videotheken-Typ, Detektiv, Trailer-Sprecher, Bordcomputer, Oma, Sportreporter, "
+                "Katze, Barde) und Einstellungen wie die Serien-Pause.",
     "sit.ask_movie": "Sie haben gerade den Film {title} zu Ende geschaut. Frag, wie er war.",
     "sit.whole_series": "die ganze Serie",
     "sit.season_n": "Staffel {season}",
@@ -292,7 +295,9 @@ Impossible", "die ganze Herr-der-Ringe-Reihe"), whole_collection = true und sear
 Teils oder der Reihe); sonst whole_collection = false. Bei allen anderen Absichten search_queries leer lassen.
 - settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Figuren an/aus). \
 Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null. Figuren: characters_on/characters_off mit den \
-IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus). Streamingdienste ("wir haben Netflix und Disney+", "Prime haben wir gekündigt"): streaming_set = alle, die sie haben \
+IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus). \
+"Verhalte dich wie eine Oma", "sei mal die Katze", "red wie ein Pirat" = nur diese Figur: characters_on mit ihrer \
+ID, characters_off alle anderen. Streamingdienste ("wir haben Netflix und Disney+", "Prime haben wir gekündigt"): streaming_set = alle, die sie haben \
 (ersetzt die Liste), streaming_add = neu dazu, streaming_remove = nicht mehr; Namen wie geschrieben.
 - feedback: sie bewerten einen kürzlich geschauten Titel. title_key aus der Liste der letzten Titel \
 wählen, wenn eindeutig; rating up/meh/down/none; text = der inhaltliche Kern (z. B. "zu blutig").
@@ -319,10 +324,10 @@ feedback.rating dann "none" und feedback.text leer.""",
                     "daran, vor allem wenn die Anfrage kein Genre nennt oder sich auf den Verlauf bezieht; "
                     "ähnelt ein Kandidat einem dieser Titel, nenne ihn in der Begründung. Gesehen haben sie nur "
                     "die Titel in diesen Listen – behaupte nie, sie kennten einen anderen Titel oder einen der "
-                    "Kandidaten. Steht per_person dabei, haben die beiden unterschiedliche Vorlieben: wähle vor "
-                    "allem Titel, die beiden gefallen könnten, meide, was einer ausdrücklich nicht mag (less_of, "
-                    "disliked), und sag in der Begründung, wenn ein Titel eher für eine Person ist (z. B. „was für "
-                    "Sam“).\n",
+                    "Kandidaten. Nenne keine Namen von Personen und schreib niemandem einzeln Vorlieben zu.\n",
+    "prompt.taste_people": "per_person: Die beiden haben unterschiedliche Vorlieben. Wähle vor allem Titel, die beiden "
+                           "gefallen könnten, meide, was einer ausdrücklich nicht mag (less_of, disliked), und sag in "
+                           "der Begründung, wenn ein Titel eher für eine Person ist – nur mit den Namen aus per_person.\n",
     "prompt.traits": "Aufgabe: Übersetze das Feedback in Merkmale für künftige Empfehlungen. 'less' = davon "
                      "weniger, 'more' = davon mehr. Benenne jedes Merkmal kurz auf Deutsch und gib passende "
                      "englische TMDB-Schlagwörter an (z. B. Gore → gore, splatter, extreme violence). "
@@ -902,8 +907,11 @@ EN: dict[str, str] = {
     "sit.settings_changed": "Confirm the settings change (saved permanently). State the new values clearly "
                             "(days as weeks where it fits).",
     "sit.chat": "Someone addressed you without wanting suggestions, feedback or a settings change. Reply "
-                "briefly and fittingly; mention what you can do if useful (suggestions by genre, 'look for "
-                "something new', settings like the series pause or characters on/off).",
+                "briefly and fittingly; mention what you can do if useful: suggestions by genre, mood or length, "
+                "looking up a specific title (also from a plot description), requesting all parts of a film "
+                "series, remembering your streaming services, switching 12 characters on and off (pirate, Gen Z, "
+                "butler, film critic, video store clerk, detective, trailer voice, ship's computer, grandma, sports "
+                "commentator, cat, bard) and settings like the series pause.",
     "sit.ask_movie": "They just finished watching the movie {title}. Ask how it was.",
     "sit.whole_series": "the whole series",
     "sit.season_n": "season {season}",
@@ -1012,7 +1020,9 @@ true and search_queries as above (title of one part or of the series); otherwise
 all other intents leave search_queries empty.
 - settings: they change a setting (series pause in days, abort follow-up in days, characters on/off). \
 Convert weeks to days. Only set changed fields, otherwise null. Characters: characters_on/characters_off with \
-the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off). Streaming services ("we have Netflix and Disney+", "we cancelled Prime"): streaming_set = all they have \
+the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off). \
+"Behave like a grandma", "be the cat for a while", "talk like a pirate" = only that character: characters_on \
+with its id, characters_off all others. Streaming services ("we have Netflix and Disney+", "we cancelled Prime"): streaming_set = all they have \
 (replaces the list), streaming_add = new ones, streaming_remove = no longer; names as written.
 - feedback: they rate a recently watched title. Pick title_key from the list of recent titles if \
 unambiguous; rating up/meh/down/none; text = the substance (e.g. "too gory").
@@ -1037,10 +1047,10 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
                     "recent_movies/recent_series = watched last, newest first): {taste}. Use it, especially when "
                     "the request names no genre or refers to their history; if a candidate resembles one of these "
                     "titles, mention it in the reason. They have only watched the titles in these lists – never "
-                    "claim they know any other title or one of the candidates. If per_person is given, the two "
-                    "have different tastes: mainly pick titles both could like, avoid what one of them clearly "
-                    "dislikes (less_of, disliked), and say in the reason when a title is more for one person "
-                    "(e.g. “one for Sam”).\n",
+                    "claim they know any other title or one of the candidates. Never name people or attribute tastes to one of them.\n",
+    "prompt.taste_people": "per_person: the two have different tastes. Mainly pick titles both could like, avoid what one "
+                           "of them clearly dislikes (less_of, disliked), and say in the reason when a title is more "
+                           "for one person – only with the names from per_person.\n",
     "prompt.traits": "Task: turn the feedback into traits for future recommendations. 'less' = less of it, "
                      "'more' = more of it. Name each trait briefly in English and give matching English TMDB "
                      "keywords (e.g. gore → gore, splatter, extreme violence). Prefer keywords that occur for "

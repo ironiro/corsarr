@@ -478,3 +478,40 @@ def test_seerr_search_marks_library_requested_and_new():
     assert [(c.title, c.year, c.source) for c in hits] == [
         ("The Sixth Sense", 1999, "library"), ("Sixth Sense Show", 2020, "pending"), ("Other", None, "new")]
     assert hits[0].votes == 12000
+
+
+# --- regressions from the first real use -------------------------------------------------------------
+
+def test_seerr_search_encodes_spaces_as_percent_20():
+    """Seerr answers HTTP 400 to "Mission+Impossible" – it wants %20 like its own web app sends."""
+    import httpx
+    from corsarr.jellyseerr import Jellyseerr
+    raw = []
+
+    def handler(request):
+        raw.append(request.url.raw_path.decode())
+        if "+" in request.url.raw_path.decode():
+            return httpx.Response(400)
+        return httpx.Response(200, json={"results": []})
+    seerr = Jellyseerr("http://seerr:5055", "k")
+    seerr.http = httpx.AsyncClient(base_url="http://seerr:5055/api/v1", transport=httpx.MockTransport(handler))
+    assert run(seerr.search("Mission: Impossible")) == []
+    assert "query=Mission%3A%20Impossible" in raw[0] and "language=" in raw[0]
+
+
+def test_runtime_limit_drops_longer_titles(db):
+    lib = [cand(1), cand(2)]
+    lib[1].runtime_min = 176
+    new = [cand(100 + i, source="new") for i in range(6)]
+    new[0].runtime_min = 150
+    rec, llm = make_recommender(db, lib, new, [0, 1, 2, 3, 4])
+    und = understanding()
+    und.max_runtime_min = 120
+    run(rec.recommend("thriller, maximal 2 stunden", und, "normal"))
+    assert all((c.runtime_min or 0) <= 120 for c in llm.seen[0])
+
+
+def test_no_per_person_instruction_without_per_person_data():
+    from corsarr import i18n
+    assert "per_person" not in i18n.DE["prompt.taste"] and "Sam" not in i18n.DE["prompt.taste"]
+    assert "Sam" not in i18n.EN["prompt.taste_people"]

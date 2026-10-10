@@ -119,6 +119,8 @@ class FeedbackIntent(BaseModel):
 class Understanding(BaseModel):
     language: str = Field("en", description="ISO 639-1 code of the language the message is written in, e.g. de, en")
     intent: Literal["recommend", "new_only", "lookup", "settings", "feedback", "chat"]
+    max_runtime_min: Optional[int] = Field(None, description=(
+        "only when they state a time limit: longest runtime in minutes ('max 2 hours' -> 120; series: per episode)"))
     search_queries: list[str] = Field(default_factory=list, description=(
         "lookup only: 1–4 TMDB search terms – your best guess of the exact title first, then short keyword "
         "combinations from the message"))
@@ -511,6 +513,8 @@ class LLM:
         genres_note = t("prompt.genres_wanted", genres=", ".join(genres)) if genres else ""
         taste = {k: v for k, v in (taste or {}).items() if v}
         taste_note = t("prompt.taste", taste=json.dumps(taste, ensure_ascii=False)) if taste else ""
+        if taste.get("per_person"):
+            taste_note += t("prompt.taste_people")
         prompt = t("prompt.select", n_min=n_min, n_max=n_max, notes=notes,
                    speaker=persona.speaker_instruction(speaker), request=request,
                    genres_note=genres_note, taste_note=taste_note,

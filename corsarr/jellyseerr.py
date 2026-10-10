@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 import httpx
+from urllib.parse import quote, urlencode
 
 from .i18n import language, t
 from .models import Candidate, FilmCollection
@@ -54,8 +55,10 @@ class Jellyseerr:
     async def _get(self, path: str, localized: bool = True, **params: Any) -> Any:
         if localized:
             params = {"language": language(), **params}  # TMDB texts in the language of the current request
+        # Seerr rejects a "+" for spaces with HTTP 400 – encode like its own web app does (%20)
+        query = urlencode(params, quote_via=quote)
         try:
-            r = await self.http.get(path, params=params)
+            r = await self.http.get(f"{path}?{query}" if query else path)
             r.raise_for_status()
         except httpx.HTTPError as e:
             if self.track:
