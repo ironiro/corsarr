@@ -93,6 +93,10 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
 
 The tests need no credentials and no running services. Details: [Development](docs/Development.md).
 
+## Changelog
+
+What changed in each release: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 [GPL-3.0](LICENSE) – free to use, study, modify and share. If you distribute a modified version, its
