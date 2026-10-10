@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (beta)
+
+- Collapsible blocks on the status page ("What for (this month)", "Output of the last update") stay open
+  while the page refreshes itself.
+
 ## v1.0.1
 
 - The message confirming a request from a suggestion card is no longer a reply to the card: Telegram quotes

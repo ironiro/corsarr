@@ -271,6 +271,13 @@ function renderStatus() {
   if (!updateInfo) loadUpdate(false);
 }
 
+// Collapsible blocks on pages that redraw themselves every few seconds (status): remember which are open.
+const openBlocks = new Set();
+function keptDetails(key, open, ...children) {
+  return h("details", { open: open || openBlocks.has(key),
+                        ontoggle: e => { e.target.open ? openBlocks.add(key) : openBlocks.delete(key); } }, ...children);
+}
+
 // --- usage and costs -------------------------------------------------------------------------
 function usageCard(u) {
   if (!u) return null;
@@ -293,7 +300,7 @@ function usageCard(u) {
     h("div", { class: "row" }, h("h2", {}, T.usage)),
     h("dl", { class: "facts" }, row(T.usage_today, u.today), row(T.usage_month, u.month), row(T.usage_total, u.total)),
     budget,
-    kinds.length ? h("details", {}, h("summary", {}, T.usage_kinds), h("ul", { class: "changes" }, kinds.map(([k, v]) =>
+    kinds.length ? keptDetails("usage-kinds", false, h("summary", {}, T.usage_kinds), h("ul", { class: "changes" }, kinds.map(([k, v]) =>
       h("li", {}, `${T["kind_" + k] || k}: ${tr("usage_calls", { n: num(v.calls) })}${v.cost === null ? "" : " · " + tr("usage_cost", { cost: fmtUsd(v.cost) })}`)))) : null,
     u.provider === "claude" ? h("p", { class: "hint" }, T.usage_hint) : null);
 }
@@ -364,7 +371,7 @@ function renderVersion() {
     rows.push(h("p", { class: "hint" }, tr("no_release", { channel: T["channel_" + u.channel] || u.channel })));
   }
   if (u.log && (u.updating || offer || u.error)) {
-    rows.push(h("details", { open: u.updating }, h("summary", {}, T.update_log), h("pre", { class: "log-tail" }, u.log)));
+    rows.push(keptDetails("update-log", u.updating, h("summary", {}, T.update_log), h("pre", { class: "log-tail" }, u.log)));
   }
   box.replaceChildren(h("div", { class: "card" },
     h("div", { class: "row" }, h("h2", {}, T.version), pill || "", h("span", { class: "spacer" }), checkBtn), rows));
