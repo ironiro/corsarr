@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .i18n import language, t
-from .models import Candidate
+from .models import Candidate, FilmCollection
 from .monitor import health
 
 log = logging.getLogger(__name__)
@@ -122,6 +122,23 @@ class Jellyseerr:
 
     async def details(self, media_type: str, tmdb_id: int) -> dict:
         return await self._get(f"/{media_type}/{tmdb_id}")
+
+    async def collection(self, collection_id: int) -> FilmCollection:
+        """A TMDB collection with what Jellyseerr knows about each part (GET /collection/{id}: parts are
+        movie results sorted by release date, each with its mediaInfo)."""
+        data = await self._get(f"/collection/{collection_id}")
+        parts = []
+        for res in data.get("parts", []):
+            cand = self._from_result(res, "movie")
+            status = (res.get("mediaInfo") or {}).get("status", 1)
+            # 4/5 = (partly) available, 2/3 = requested/processing, 6 = blocklisted; 1 unknown, 7 deleted = missing
+            cand.source = ("library" if status in (4, 5) else "pending" if status in (2, 3)
+                           else "blocked" if status == 6 else "new")
+            cand.votes = res.get("voteCount")
+            parts.append(cand)
+        poster = data.get("posterPath")
+        return FilmCollection(tmdb_id=int(data.get("id") or collection_id), name=data.get("name") or "?",
+                              poster_url=f"{POSTER_BASE}{poster}" if poster else None, parts=parts)
 
     async def request(self, media_type: str, tmdb_id: int) -> dict:
         body: dict[str, Any] = {"mediaType": media_type, "mediaId": tmdb_id}

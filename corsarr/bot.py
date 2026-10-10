@@ -1,6 +1,7 @@
 """Telegram side: mentions/replies, suggestion cards, buttons, feedback questions, outage mode."""
 from __future__ import annotations
 
+import asyncio
 import functools
 import html
 import json
@@ -26,7 +27,7 @@ from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
 from .llm import LLM, LLMFailed, LLMUnavailable, Understanding
 from .translate import Translations
-from .models import Candidate
+from .models import Candidate, FilmCollection
 from .poster import placeholder_png
 from .recommender import Recommender
 
@@ -193,6 +194,9 @@ class CorsarrBot:
         if not rec.picks:
             await self._say_reply(msg, t("sit.lookup_none"), {"request": text, "searched": und.search_queries})
             return
+        if rec.collection is not None:
+            await self._send_collection(rec.collection, rec.intro)
+            return
         await msg.reply_text(rec.intro)
         await self._send_carousel(rec.picks)
 
@@ -324,6 +328,108 @@ class CorsarrBot:
             await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
         except TelegramError as e:
             log.warning(t("log.not_editable", error=e))
+
+    # --- film series: one message listing all parts, one button requests the missing ones ----------
+    async def _send_collection(self, coll: FilmCollection, intro: str) -> None:
+        parts = []
+        for c in coll.parts:
+            # Missing parts get a suggestion row: it records who requested them (and was_requested sees it).
+            sid = self.db.add_suggestion(c) if c.source == "new" and c.tmdb_id else None
+            parts.append({"label": c.label, "source": c.source, "sid": sid})
+        card = {"name": coll.name, "poster_url": coll.poster_url, "intro": intro, "lang": language(),
+                "parts": parts}
+        col_id = self.db.add_collection(coll.tmdb_id, json.dumps(card, ensure_ascii=False))
+        caption, markup = self._collection_view(col_id, card)
+        try:
+            sent = await self.bot.send_photo(self.cfg.chat_id, coll.poster_url or placeholder_png(),
+                                             caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except TelegramError as e:  # e.g. Telegram could not fetch the poster URL
+            log.warning(t("log.card_failed", title=coll.name, error=e))
+            sent = await self.bot.send_photo(self.cfg.chat_id, placeholder_png(), caption=caption,
+                                             parse_mode=ParseMode.HTML, reply_markup=markup)
+        self.db.set_collection_message(col_id, sent.message_id)
+
+    def _missing_parts(self, card: dict) -> list:
+        """Suggestion rows of the parts that are still missing (not requested via the bot yet)."""
+        rows = [self.db.suggestion(p["sid"]) for p in card["parts"] if p.get("sid")]
+        return [r for r in rows if r is not None and r["status"] != "requested"]
+
+    def _collection_view(self, col_id: int, card: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+        with use_language(card.get("lang")):  # the message stays in the language it was sent in
+            lines = []
+            for p in card["parts"]:
+                title = html.escape(p["label"])
+                row = self.db.suggestion(p["sid"]) if p.get("sid") else None
+                if row is not None and row["status"] == "requested":
+                    lines.append(t("bot.coll_requested_by", title=title,
+                                   who=html.escape(row["decided_by"] or t("bot.someone"))))
+                else:
+                    key = {"library": "bot.coll_library", "pending": "bot.coll_pending",
+                           "blocked": "bot.coll_blocked"}.get(p["source"], "bot.coll_missing")
+                    lines.append(t(key, title=title))
+            head = f"<b>{html.escape(card['name'])}</b>"
+            intro = html.escape(card.get("intro") or "")
+            caption = "\n".join([head, *lines])
+            if intro and len(intro) + len(caption) + 2 <= CAPTION_LIMIT:
+                caption = f"{intro}\n\n{caption}"
+            while len(caption) > CAPTION_LIMIT and lines:  # very long series: cut the list
+                lines.pop()
+                more = t("bot.coll_more", n=len(card["parts"]) - len(lines))
+                caption = "\n".join([head, *lines, more])
+            missing = len(self._missing_parts(card))
+            if not missing:
+                return caption, None
+            button = InlineKeyboardButton(t("bot.btn_request_missing", n=missing), callback_data=f"col:{col_id}")
+            return caption, InlineKeyboardMarkup([[button]])
+
+    async def _cb_collection(self, q, col_id: int) -> None:
+        col = self.db.collection(col_id)
+        if col is None:
+            await q.answer()
+            return
+        card = json.loads(col["card"])
+        missing = self._missing_parts(card)
+        if not missing:
+            await q.answer(t("bot.coll_nothing_missing"))
+            return
+        who = q.from_user.first_name if q.from_user else t("bot.someone")
+        # Mark first: both people may press the button at the same time.
+        for s in missing:
+            self.db.set_suggestion_status(s["id"], "requested", who)
+        results = await asyncio.gather(*(self.seerr.request("movie", s["tmdb_id"]) for s in missing),
+                                       return_exceptions=True)
+        requested, failed = [], 0
+        for s, res in zip(missing, results):
+            if isinstance(res, httpx.HTTPStatusError) and res.response.status_code == 409:
+                requested.append(s)  # already requested in Jellyseerr itself – on its way all the same
+            elif isinstance(res, BaseException):
+                self.db.set_suggestion_status(s["id"], s["status"])
+                failed += 1
+                if isinstance(res, httpx.HTTPStatusError):
+                    log.warning(t("log.request_failed", title=s["title"], status=res.response.status_code,
+                                  body=res.response.text))
+                else:
+                    log.warning(t("log.request_failed", title=s["title"], status="-", body=res))
+            else:
+                requested.append(s)
+                log.info(t("log.requested", title=s["title"], who=who))
+        if failed:
+            await q.answer(t("bot.coll_failed", n=failed), show_alert=True)
+        else:
+            await q.answer(t("bot.coll_requested", n=len(requested)))
+        caption, markup = self._collection_view(col_id, card)
+        try:
+            await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except TelegramError as e:
+            log.warning(t("log.not_editable", error=e))
+        if not requested:
+            return
+        try:
+            text = await self.llm.say(t("sit.collection_requested"), self.speaker(), {
+                "series": card["name"], "titles": [s["title"] for s in requested], "requested_by": who})
+        except LLMFailed:
+            return
+        await self.post(text, reply_to_message_id=q.message.message_id)
 
     # --- settings --------------------------------------------------------------
     async def _settings(self, msg: Message, und: Understanding) -> None:
@@ -460,6 +566,8 @@ class CorsarrBot:
                 await self._cb_reject(q, int(parts[1]))
             elif parts[0] == "acc":
                 await self._cb_accept(q, int(parts[1]))
+            elif parts[0] == "col":
+                await self._cb_collection(q, int(parts[1]))
             elif parts[0] == "nav":
                 await self._cb_nav(q, int(parts[1]), int(parts[2]))
             elif parts[0] == "fb":

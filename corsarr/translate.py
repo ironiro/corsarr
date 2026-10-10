@@ -17,7 +17,7 @@ from .llm import LLM, LLMFailed, LLMUnavailable
 
 log = logging.getLogger(__name__)
 
-CHUNK = 60          # texts per model call
+CHUNK = 100         # texts per model call (all fixed texts fit into one)
 RETRY_AFTER = 3600  # seconds before a failed language is tried again
 
 

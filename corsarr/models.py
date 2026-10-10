@@ -36,3 +36,12 @@ class Candidate:
     @property
     def label(self) -> str:
         return f"{self.title} ({self.year})" if self.year else self.title
+
+
+@dataclass
+class FilmCollection:
+    """A TMDB collection ("Mission: Impossible – Filmreihe") with its parts in release order."""
+    tmdb_id: int
+    name: str
+    poster_url: str | None = None
+    parts: list[Candidate] = field(default_factory=list)  # source per part: library | pending | new | blocked
