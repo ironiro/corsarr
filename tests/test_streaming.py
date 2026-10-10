@@ -156,3 +156,49 @@ def test_streaming_picker_api_and_live_save(env):  # noqa: F811
         finally:
             await rt.seerr.close()
     with_client(test)
+
+
+# --- changing the services in the chat --------------------------------------------------------------
+
+PROVIDERS = [{"id": 8, "name": "Netflix"}, {"id": 9, "name": "Amazon Prime Video"}, {"id": 337, "name": "Disney Plus"},
+             {"id": 1796, "name": "Netflix basic with Ads"}, {"id": 350, "name": "Apple TV+"}]
+
+
+def test_service_names_from_the_chat_are_matched():
+    from corsarr.jellyseerr import Jellyseerr
+    found, missing = Jellyseerr.match_providers(["netflix", "Prime", "Disney+", "apple tv+", "Kabelfernsehen"], PROVIDERS)
+    assert [p["id"] for p in found] == [8, 9, 337, 350] and missing == ["Kabelfernsehen"]
+
+
+def test_chat_sets_adds_and_removes_services(tmp_path, monkeypatch):
+    import asyncio
+    from corsarr import config
+    from corsarr.bot import CorsarrBot
+    from corsarr.jellyseerr import Jellyseerr
+    from corsarr.llm import SettingsChange
+
+    for f in config.FIELDS:
+        monkeypatch.delenv(f.name, raising=False)
+    monkeypatch.setenv("CORSARR_ENV_FILE", str(tmp_path / "none.env"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    class Seerr(Jellyseerr):
+        def __init__(self):
+            pass
+
+        async def watch_providers(self, region):
+            return PROVIDERS
+
+    bot = CorsarrBot.__new__(CorsarrBot)
+    bot.cfg, bot.seerr = config.load(), Seerr()
+    reloads = []
+
+    def reload():
+        reloads.append(1)
+        bot.cfg = config.load()
+    bot.on_config_change = reload
+    res = asyncio.run(bot._set_streaming(SettingsChange(streaming_set=["Netflix", "Prime"])))
+    assert res["streaming_services_now"] == ["Netflix", "Amazon Prime Video"] and bot.cfg.streaming_ids == {8, 9}
+    res = asyncio.run(bot._set_streaming(SettingsChange(streaming_add=["Disney+"], streaming_remove=["Prime"])))
+    assert bot.cfg.streaming_ids == {8, 337} and res["not_found"] == [] and len(reloads) == 2
+    assert config.read_overrides(tmp_path)["STREAMING_PROVIDERS"] == "8,337"  # saved like from the web interface

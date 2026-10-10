@@ -104,6 +104,10 @@ class SettingsChange(BaseModel):
     abort_days: Optional[int] = Field(None, description="days until the abort follow-up")
     characters_on: list[str] = Field(default_factory=list, description="ids of characters to switch on")
     characters_off: list[str] = Field(default_factory=list, description="ids of characters to switch off")
+    streaming_set: list[str] = Field(default_factory=list, description=(
+        "streaming services they say they have (replaces the list), names as written"))
+    streaming_add: list[str] = Field(default_factory=list, description="streaming services they got")
+    streaming_remove: list[str] = Field(default_factory=list, description="streaming services they no longer have")
 
 
 class FeedbackIntent(BaseModel):
