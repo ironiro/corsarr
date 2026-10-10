@@ -68,6 +68,13 @@ Requires the [Jellyfin webhook](Webhooks.md#jellyfin--feedback-after-watching).
 | Movie stopped before 80 % and not resumed (default 3 days) | then | 👎 wasn't good / 😴 too tired / ▶️ we'll keep watching |
 | Abandoned-movie question unanswered for 2 days | – | counts as a light 👎 |
 
+**Each of you rates for yourself.** Both can press 👍 / 😐 / 👎 (or reply with text); the question shows who
+rated what (`🗳️ 👍 Sam · 👎 Alex`) and stays open until everyone known in the group has rated – at most a day
+after the first rating. Pressing again changes your own rating. Corsarr keeps a taste profile per person and
+suggests titles you could both like: what one of you clearly dislikes drops down, and a reason says so when a
+title is more for one of you ("one for Sam"). Ratings from before this feature count for both. Corsarr knows
+who is in the group from who writes to it or presses its buttons.
+
 - Every question starts with a header line showing which title it is about, e.g.
   **📺 Andor (2022) · season 1**.
 - For details **reply directly to the question**, e.g. `too gory, but a good story`. The bot turns that into

@@ -18,6 +18,7 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
 - **Looking up a title:** `@bot there's a new Marvel series with Vision now` or `@bot what's the film where the
   guy was dead all along?` → the matching title as a card, ready to watch or request.
 - **Based on your history:** `@bot what fits what we watched lately?`
+- **Feedback per person:** both rate after the film, and suggestions respect both tastes.
 - **Feedback:** movie finished, season done, series paused, movie abandoned – the bot asks and remembers
   free text like "too gory" as *less: gore*.
 - **Download notifications:** new episodes one by one, backfilled seasons as a single message

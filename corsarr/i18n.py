@@ -295,7 +295,10 @@ feedback.rating dann "none" und feedback.text leer.""",
                     "daran, vor allem wenn die Anfrage kein Genre nennt oder sich auf den Verlauf bezieht; "
                     "ähnelt ein Kandidat einem dieser Titel, nenne ihn in der Begründung. Gesehen haben sie nur "
                     "die Titel in diesen Listen – behaupte nie, sie kennten einen anderen Titel oder einen der "
-                    "Kandidaten.\n",
+                    "Kandidaten. Steht per_person dabei, haben die beiden unterschiedliche Vorlieben: wähle vor "
+                    "allem Titel, die beiden gefallen könnten, meide, was einer ausdrücklich nicht mag (less_of, "
+                    "disliked), und sag in der Begründung, wenn ein Titel eher für eine Person ist (z. B. „was für "
+                    "Sam“).\n",
     "prompt.traits": "Aufgabe: Übersetze das Feedback in Merkmale für künftige Empfehlungen. 'less' = davon "
                      "weniger, 'more' = davon mehr. Benenne jedes Merkmal kurz auf Deutsch und gib passende "
                      "englische TMDB-Schlagwörter an (z. B. Gore → gore, splatter, extreme violence). "
@@ -963,7 +966,10 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
                     "recent_movies/recent_series = watched last, newest first): {taste}. Use it, especially when "
                     "the request names no genre or refers to their history; if a candidate resembles one of these "
                     "titles, mention it in the reason. They have only watched the titles in these lists – never "
-                    "claim they know any other title or one of the candidates.\n",
+                    "claim they know any other title or one of the candidates. If per_person is given, the two "
+                    "have different tastes: mainly pick titles both could like, avoid what one of them clearly "
+                    "dislikes (less_of, disliked), and say in the reason when a title is more for one person "
+                    "(e.g. “one for Sam”).\n",
     "prompt.traits": "Task: turn the feedback into traits for future recommendations. 'less' = less of it, "
                      "'more' = more of it. Name each trait briefly in English and give matching English TMDB "
                      "keywords (e.g. gore → gore, splatter, extreme violence). Prefer keywords that occur for "

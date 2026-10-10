@@ -143,7 +143,7 @@ def parse_iso(value: str) -> datetime:
 
 # Database format version (SQLite user_version). Raise it whenever _migrate changes something, so an
 # older Corsarr – e.g. after switching from beta back to stable – refuses a database it doesn't understand.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: who gave a rating (feedback/traits rater_id, rater_name)
 
 
 class DatabaseTooNew(Exception):
@@ -177,6 +177,9 @@ class DB:
                 "decided_by": "TEXT",      # first name of whoever pressed accept/reject/request
                 "file_id": "TEXT",         # Telegram file id of the poster once uploaded
             },
+            # Who rated – NULL for ratings from before per-person taste (they count for everyone).
+            "feedback": {"rater_id": "INTEGER", "rater_name": "TEXT"},
+            "traits": {"rater_id": "INTEGER", "rater_name": "TEXT"},
         }
         for table, columns in added.items():
             have = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
@@ -291,14 +294,20 @@ class DB:
         free_text: str | None = None,
         genres: list[str] | None = None,
         keywords: list[str] | None = None,
+        rater: tuple[int, str] | None = None,
     ) -> int:
+        rater_id, rater_name = rater or (None, None)
         cur = self._exec(
             "INSERT INTO feedback(title_key, title, media_type, rating, weight, free_text, genres, "
-            "keywords, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "keywords, created_at, rater_id, rater_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (key, title, media_type, rating, weight, free_text,
-             json.dumps(genres or []), json.dumps(keywords or []), iso(now())),
+             json.dumps(genres or []), json.dumps(keywords or []), iso(now()), rater_id, rater_name),
         )
         return int(cur.lastrowid)
+
+    def delete_feedback(self, feedback_id: int) -> None:
+        """A rating that was changed: the new one replaces it."""
+        self._exec("DELETE FROM feedback WHERE id=?", (feedback_id,))
 
     def all_feedback(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM feedback ORDER BY id")
@@ -311,12 +320,13 @@ class DB:
         return {r["title_key"] for r in self.conn.execute("SELECT title_key FROM feedback")}
 
     def add_trait(self, direction: str, trait: str, keywords: list[str], feedback_id: int | None,
-                  weight: float = 1.0) -> None:
+                  weight: float = 1.0, rater: tuple[int, str] | None = None) -> None:
+        rater_id, rater_name = rater or (None, None)
         self._exec(
-            "INSERT INTO traits(direction, trait, keywords, weight, feedback_id, created_at) "
-            "VALUES(?,?,?,?,?,?)",
+            "INSERT INTO traits(direction, trait, keywords, weight, feedback_id, created_at, rater_id, rater_name) "
+            "VALUES(?,?,?,?,?,?,?,?)",
             (direction, trait, json.dumps([k.lower() for k in keywords]), weight, feedback_id,
-             iso(now())),
+             iso(now()), rater_id, rater_name),
         )
 
     def traits(self) -> list[dict]:
