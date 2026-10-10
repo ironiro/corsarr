@@ -8,6 +8,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 REMOTE="$(git remote get-url origin)"
+# Commit as the identity of this repository, not the global one (which may hold a real name and address)
+NAME="$(git config user.name)"
+EMAIL="$(git config user.email)"
 WIKI="${REMOTE%.git}.wiki.git"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -26,6 +29,6 @@ if git diff --cached --quiet; then
     echo "Wiki is already up to date."
     exit 0
 fi
-git commit --quiet -m "Update wiki from docs/"
+git -c user.name="$NAME" -c user.email="$EMAIL" commit --quiet -m "Update wiki from docs/"
 git push --quiet
 echo "Wiki updated: ${REMOTE%.git}/wiki"
