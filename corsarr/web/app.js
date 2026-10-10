@@ -535,19 +535,24 @@ function renderConfig(message) {
 
   // Behaviour settings: saved immediately – the confirmation appears right next to the changed setting.
   const savedMark = key => key === savedSetting ? h("span", { class: "saved-mark" }, T.setting_saved) : null;
+  const setting = s => {
+    const label = T["s_" + s.key] || s.key;
+    if (s.kind === "bool") {
+      return h("label", { class: "switch" },
+        h("input", { type: "checkbox", checked: s.value, onchange: e => saveSetting(s.key, e.target.checked) }), label,
+        savedMark(s.key));
+    }
+    return h("div", { class: "field" }, h("label", {}, label),
+      h("div", { class: "row" },
+        h("input", { type: "number", min: s.min, max: s.max, value: s.value, style: "max-width:140px",
+                     onchange: e => saveSetting(s.key, e.target.value) }), savedMark(s.key)));
+  };
+  // The characters (<id>_enabled) as a grid of switches below the other settings
+  const isCharacter = s => s.kind === "bool" && s.key.endsWith("_enabled");
   const behaviour = h("div", { class: "card" }, h("h2", {}, T.behaviour), h("p", { class: "hint" }, T.behaviour_hint),
-    configData.settings.map(s => {
-      const label = T["s_" + s.key] || s.key;
-      if (s.kind === "bool") {
-        return h("label", { class: "switch" },
-          h("input", { type: "checkbox", checked: s.value, onchange: e => saveSetting(s.key, e.target.checked) }), label,
-          savedMark(s.key));
-      }
-      return h("div", { class: "field" }, h("label", {}, label),
-        h("div", { class: "row" },
-          h("input", { type: "number", min: s.min, max: s.max, value: s.value, style: "max-width:140px",
-                       onchange: e => saveSetting(s.key, e.target.value) }), savedMark(s.key)));
-    }));
+    configData.settings.filter(s => !isCharacter(s)).map(setting),
+    h("h3", { class: "subhead" }, T.characters), h("p", { class: "hint" }, T.characters_hint),
+    h("div", { class: "characters" }, configData.settings.filter(isCharacter).map(setting)));
 
   // Connection and system fields: only saved with the button, then the bot restarts.
   // One collapsible section per group; closed it shows a one-line summary and whether something is missing.

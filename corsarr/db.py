@@ -7,11 +7,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from . import persona
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "series_pause_days": 14,
     "abort_days": 3,
-    "pirate_enabled": True,
-    "genz_enabled": True,
+    **persona.default_settings(),  # <character>_enabled for every character (persona.py)
 }
 
 SCHEMA = """

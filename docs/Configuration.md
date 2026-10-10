@@ -115,10 +115,10 @@ These settings live in the database, apply immediately and can also be changed i
 | --- | --- | --- |
 | Series pause: ask after … days (1–365) | 14 | `@bot ask about series only after 3 weeks` |
 | Abandoned movies: ask after … days (1–60) | 3 | `@bot ask about abandoned movies after 5 days` |
-| 🏴‍☠️ Pirate active | on | `@bot no more pirate` |
-| 📱 Gen Z active | on | `@bot Gen Z back on` |
+| Characters (12 switches) | Pirate and Gen Z on, the others off | `@bot no more pirate`, `@bot switch grandma on` |
 
-With both characters off, the bot writes in a plain, neutral style.
+The characters are listed in [Usage](Usage.md#characters-and-language). With all of them off, the bot writes in a
+plain, neutral style.
 
 ## The web interface
 

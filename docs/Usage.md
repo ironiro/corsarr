@@ -83,14 +83,32 @@ Requires the [Jellyfin webhook](Webhooks.md#jellyfin--feedback-after-watching).
 | --- | --- |
 | `@bot ask about series only after 3 weeks` | series pause set to 21 days |
 | `@bot ask about abandoned movies after 5 days` | follow-up for abandoned movies set to 5 days |
-| `@bot no more pirate` · `@bot Gen Z back on` | characters off/on |
+| `@bot no more pirate` · `@bot switch grandma on` · `@bot only the cat` | characters off/on |
 
 The same settings are in the web interface under *Configuration → Bot behaviour*.
 
 ## Characters and language
 
-- 🏴‍☠️ **Pirate** and 📱 **Gen Z** take turns at random or have a short exchange. If only one is active, only
-  that one speaks; with both off the bot writes plainly.
+- Twelve characters, each switched on or off on its own (web interface → Configuration → *Characters*, or
+  in the chat: `@bot switch grandma on`, `@bot only the cat`, `@bot no more pirate`). Pirate and Gen Z are on
+  by default. Each message is spoken by one active character; now and then two of them have a short exchange.
+  With all off the bot writes plainly.
+
+| Character | Emoji | Sounds like |
+| --- | --- | --- |
+| Pirate | 🏴‍☠️ | an old sea dog with dry humour |
+| Gen Z | 📱 | a dry, self-deprecating mid-twenties group chat member |
+| Butler | 🎩 | formal, British understatement |
+| Film critic | 🧐 | well-read, a little snobbish, talks direction and camera |
+| Video store clerk | 📼 | 90s nostalgia, "kept it behind the counter for you" |
+| Film noir detective | 🕵️ | short hard sentences, rain and neon |
+| Trailer voice | 🎙️ | "In a world …" |
+| Ship's computer | 🤖 | analyses and probabilities, eerily polite |
+| Grandma | 👵 | warm, worried, "don't stay up too late" |
+| Sports commentator | ⚽ | covers the pick like a live match |
+| Cat | 🐈 | bored, condescending, wants to sleep |
+| Bard | 🧙 | tells it like a heroic saga |
+
 - The characters avoid repeating themselves: the bot remembers its latest phrasings.
 - **Language:** the bot answers in whatever language you write in – French, Spanish, Turkish, … – text,
   suggestion card, buttons, reasons and TMDB plot summaries (where TMDB has them in that language).

@@ -794,3 +794,8 @@ details.group > .field:last-child { margin-bottom: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { details.group > summary::before { transition: none; } }
 @media (max-width: 640px) { details.group > summary .summary { display: none; } }
+
+/* --- characters: a grid of switches in the behaviour card --------------------------------------- */
+.subhead { margin: 22px 0 4px; font-size: 15px; }
+.characters { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 16px; }
+.characters .switch { margin: 6px 0; }

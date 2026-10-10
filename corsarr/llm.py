@@ -84,8 +84,8 @@ class LLMFailed(Exception):
 class SettingsChange(BaseModel):
     series_pause_days: Optional[int] = Field(None, description="days until a series counts as paused")
     abort_days: Optional[int] = Field(None, description="days until the abort follow-up")
-    pirate_enabled: Optional[bool] = None
-    genz_enabled: Optional[bool] = None
+    characters_on: list[str] = Field(default_factory=list, description="ids of characters to switch on")
+    characters_off: list[str] = Field(default_factory=list, description="ids of characters to switch off")
 
 
 class FeedbackIntent(BaseModel):
@@ -396,7 +396,7 @@ class LLM:
     def _remember(self, *texts: str) -> None:
         for text in texts:
             for line in text.splitlines():
-                line = line.removeprefix(persona.PIRATE).removeprefix(persona.GENZ).strip()
+                line = persona.strip_emoji(line)[1]
                 if line:
                     self.recent_lines.append(line[:120])
 

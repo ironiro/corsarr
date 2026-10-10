@@ -3,7 +3,7 @@
 A Telegram bot for movie night. Corsarr suggests movies and series to your group – from your Jellyfin
 library first, plus new titles via Jellyseerr. After you've watched something, it asks how you liked it and learns your taste.
 It also reports what Sonarr and Radarr downloaded, grouped together rather than one message per episode. It answers in
-whatever language you write in – as a 🏴‍☠️ pirate, a 📱 Gen Z character or in a neutral voice. Powered by Claude Haiku via the Claude API, with a web interface for status, events and
+whatever language you write in – in the voice of up to twelve characters (🏴‍☠️ pirate, 📱 Gen Z, 🎩 butler, 👵 grandma, 🐈 cat, …) or a neutral one. Powered by Claude Haiku via the Claude API, with a web interface for status, events and
 configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are **untested**.
 
 ![Corsarr in a Telegram group: a suggestion card, feedback after the movie and download notifications](docs/images/telegram-chat.jpg)

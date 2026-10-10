@@ -327,7 +327,15 @@ class CorsarrBot:
 
     # --- settings --------------------------------------------------------------
     async def _settings(self, msg: Message, und: Understanding) -> None:
-        changes = {k: v for k, v in und.settings.model_dump().items() if v is not None}
+        changes = {k: v for k, v in und.settings.model_dump().items()
+                   if v is not None and k not in ("characters_on", "characters_off")}
+        # "only grandma" arrives as on=[grandma], off=[everyone else]; unknown ids are ignored
+        for cid in und.settings.characters_off:
+            if cid in persona.CHARACTERS:
+                changes[persona.setting(cid)] = False
+        for cid in und.settings.characters_on:
+            if cid in persona.CHARACTERS:
+                changes[persona.setting(cid)] = True
         applied = {}
         for key, value in changes.items():
             if key in SETTING_LIMITS:

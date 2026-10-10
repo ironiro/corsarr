@@ -96,7 +96,34 @@ def test_enforce_normal_strips_emojis():
 def test_choose_speaker_respects_settings():
     assert persona.choose_speaker({"pirate_enabled": False, "genz_enabled": True}) == "genz"
     assert persona.choose_speaker({"pirate_enabled": False, "genz_enabled": False}) == "normal"
-    assert persona.choose_speaker({"pirate_enabled": True, "genz_enabled": True}) in {"pirate", "genz", "dialog"}
+    assert persona.choose_speaker({"pirate_enabled": True, "genz_enabled": True}) in {
+        "pirate", "genz", "dialog:pirate,genz", "dialog:genz,pirate"}
+
+
+def test_new_characters_are_off_until_switched_on_and_can_talk_to_each_other():
+    only_defaults = persona.default_settings()
+    assert persona.active(only_defaults) == ["pirate", "genz"]
+    settings = {**only_defaults, "pirate_enabled": False, "genz_enabled": False, "grandma_enabled": True}
+    assert {persona.choose_speaker(settings) for _ in range(20)} == {"grandma"}
+    settings["cat_enabled"] = True
+    seen = {persona.choose_speaker(settings) for _ in range(200)}
+    assert seen <= {"grandma", "cat", "dialog:grandma,cat", "dialog:cat,grandma"} and len(seen) >= 3
+
+
+def test_enforce_dialog_of_two_characters_and_emoji_variants():
+    out = persona.enforce("Kinder, esst was!\n🕵 Es regnete.\n🏴‍☠️ falsch hier", "dialog:grandma,noir")
+    assert out.splitlines() == ["👵 Kinder, esst was!", "🕵️ Es regnete.", "👵 falsch hier"]
+    assert persona.strip_emoji("🕵️ Es regnete.") == ("noir", "Es regnete.")
+    assert persona.enforce("👵 **👵 Oma:** Kinder!\n🐈 **Katze:** *gähn*", "dialog:grandma,cat") == "👵 Kinder!\n🐈 *gähn*"
+
+
+def test_every_character_has_texts_in_both_languages():
+    from corsarr import i18n
+    for cid in persona.CHARACTERS:
+        for key in (f"prompt.char_{cid}", f"prompt.name_{cid}", f"gui.s_{cid}_enabled"):
+            assert key in i18n.DE and key in i18n.EN, key
+    assert "{list}" not in persona.characters() and "🧙" in persona.characters()
+    assert "👵" in persona.speaker_instruction("grandma") and "🐈" in persona.speaker_instruction("dialog:grandma,cat")
 
 
 # --- db -----------------------------------------------------------------------------
