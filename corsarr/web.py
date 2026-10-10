@@ -527,9 +527,11 @@ async def api_config_save(request: web.Request) -> web.Response:
                         and n != "ADMIN_PASSWORD" for n in changed)
     if needs_restart:
         await rt.restart()
-    else:
+    elif hasattr(rt, "apply_live_config"):
+        rt.apply_live_config()  # e.g. streaming services or the budget apply right away
+    else:  # test runtimes
         rt.cfg = config.load()
-        if seerr := getattr(rt, "seerr", None):  # streaming services apply to the next cards right away
+        if seerr := getattr(rt, "seerr", None):
             seerr.set_streaming(rt.cfg.streaming_region, rt.cfg.streaming_ids)
     return web.json_response({"restart": needs_restart, "app_restart": app_restart, **config_payload(rt)})
 

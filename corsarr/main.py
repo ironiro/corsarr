@@ -110,6 +110,15 @@ class Runtime:
         async with self._lock:
             await self._stop()
 
+    def apply_live_config(self) -> None:
+        """Settings that take effect without a restart (budget, admin chat, streaming services, …): reload
+        and hand them to the running bot – changed in the web interface or in the chat."""
+        self.cfg = config.load()
+        if self.corsarr is not None:
+            self.corsarr.cfg = self.cfg
+        if self.seerr is not None:
+            self.seerr.set_streaming(self.cfg.streaming_region, self.cfg.streaming_ids)
+
     async def restore(self, settings: dict, database: bytes | None) -> None:
         """Replace database and settings with a backup's and start again (see backup.py)."""
         async with self._lock:
@@ -154,6 +163,7 @@ class Runtime:
         self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles)
         self.corsarr = CorsarrBot(cfg, self.db, self.jellyfin, self.seerr, self.llm, recommender, self.feedback)
         self.feedback.notifier = self.corsarr.ask_feedback
+        self.corsarr.on_config_change = self.apply_live_config
 
         # Generous timeouts: sending a poster makes Telegram fetch or upload an image first.
         app = (Application.builder().token(cfg.telegram_token).concurrent_updates(True)

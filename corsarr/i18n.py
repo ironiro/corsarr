@@ -292,7 +292,8 @@ Impossible", "die ganze Herr-der-Ringe-Reihe"), whole_collection = true und sear
 Teils oder der Reihe); sonst whole_collection = false. Bei allen anderen Absichten search_queries leer lassen.
 - settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Figuren an/aus). \
 Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null. Figuren: characters_on/characters_off mit den \
-IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus).
+IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus). Streamingdienste ("wir haben Netflix und Disney+", "Prime haben wir gekündigt"): streaming_set = alle, die sie haben \
+(ersetzt die Liste), streaming_add = neu dazu, streaming_remove = nicht mehr; Namen wie geschrieben.
 - feedback: sie bewerten einen kürzlich geschauten Titel. title_key aus der Liste der letzten Titel \
 wählen, wenn eindeutig; rating up/meh/down/none; text = der inhaltliche Kern (z. B. "zu blutig").
 - chat: alles andere.
@@ -371,6 +372,7 @@ feedback.rating dann "none" und feedback.text leer.""",
     "cfg.not_number": "{name}: „{value}“ ist keine gültige Zahl",
     "log.private_chat": "Private Nachricht von {name} (Chat-ID {id})",
     "log.budget_warned": "Budget-Warnung ({level} %): {cost} $ von {budget} $",
+    "log.streaming_changed": "Streaming-Dienste im Chat geändert: {services}",
     "log.llm_down": "{provider} nicht verfügbar: {reason}",
     "log.llm_back": "{provider} wieder erreichbar",
     "log.genres_failed": "Genrelisten nicht ladbar (neuer Versuch später): {error}",
@@ -1005,7 +1007,8 @@ true and search_queries as above (title of one part or of the series); otherwise
 all other intents leave search_queries empty.
 - settings: they change a setting (series pause in days, abort follow-up in days, characters on/off). \
 Convert weeks to days. Only set changed fields, otherwise null. Characters: characters_on/characters_off with \
-the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off).
+the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off). Streaming services ("we have Netflix and Disney+", "we cancelled Prime"): streaming_set = all they have \
+(replaces the list), streaming_add = new ones, streaming_remove = no longer; names as written.
 - feedback: they rate a recently watched title. Pick title_key from the list of recent titles if \
 unambiguous; rating up/meh/down/none; text = the substance (e.g. "too gory").
 - chat: anything else.
@@ -1082,6 +1085,7 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
     "cfg.not_number": "{name}: “{value}” is not a valid number",
     "log.private_chat": "Private message from {name} (chat id {id})",
     "log.budget_warned": "Budget warning ({level} %): ${cost} of ${budget}",
+    "log.streaming_changed": "Streaming services changed in the chat: {services}",
     "log.llm_down": "{provider} unavailable: {reason}",
     "log.llm_back": "{provider} reachable again",
     "log.genres_failed": "Could not load genre lists (retrying later): {error}",

@@ -17,7 +17,7 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
-from . import arr, persona, usage
+from . import arr, config, persona, usage
 from .i18n import default_language, language, normalize, switch_language, t, use_language
 from .monitor import health
 from .config import Config
@@ -56,6 +56,7 @@ class CorsarrBot:
         self.cfg, self.db, self.jellyfin, self.seerr = cfg, db, jellyfin, seerr
         self.llm, self.recommender, self.feedback = llm, recommender, feedback
         self.translations = Translations(db, llm)  # fixed texts for languages without built-in ones
+        self.on_config_change = lambda: None  # set by the runtime: reload settings changed in the chat
         self.app: Application | None = None
         self.bot_id: int | None = None
         self.username = ""
@@ -490,6 +491,9 @@ class CorsarrBot:
             if cid in persona.CHARACTERS:
                 changes[persona.setting(cid)] = True
         applied = {}
+        s = und.settings
+        if s.streaming_set or s.streaming_add or s.streaming_remove:
+            applied["streaming"] = await self._set_streaming(s)
         for key, value in changes.items():
             if key in SETTING_LIMITS:
                 lo, hi = SETTING_LIMITS[key]
@@ -503,6 +507,29 @@ class CorsarrBot:
         # Speaker is chosen after applying, so "kein Pirat mehr" is already confirmed without him.
         await self._say_reply(msg, t("sit.settings_changed"),
                               {"changed": applied, "all_settings": self.db.settings()})
+
+    async def _set_streaming(self, s) -> dict:
+        """"We have Netflix and Disney+" / "we cancelled Prime": change STREAMING_PROVIDERS like the web
+        interface does (saved in config.json, applies to the next cards right away)."""
+        providers = await self.seerr.watch_providers(self.cfg.streaming_region)
+        ids = set(self.cfg.streaming_ids)
+        missing: list[str] = []
+        if s.streaming_set:
+            found, miss = self.seerr.match_providers(s.streaming_set, providers)
+            ids, missing = {p["id"] for p in found}, missing + miss
+        found, miss = self.seerr.match_providers(s.streaming_add, providers)
+        ids |= {p["id"] for p in found}
+        missing += miss
+        found, miss = self.seerr.match_providers(s.streaming_remove, providers)
+        ids -= {p["id"] for p in found}
+        missing += miss
+        overrides = config.read_overrides(self.cfg.data_dir)
+        overrides["STREAMING_PROVIDERS"] = ",".join(str(i) for i in sorted(ids))
+        config.write_overrides(self.cfg.data_dir, overrides)
+        self.on_config_change()
+        names = [p["name"] for p in providers if p["id"] in ids]
+        log.info(t("log.streaming_changed", services=", ".join(names) or "–"))
+        return {"streaming_services_now": names, "not_found": missing, "country": self.cfg.streaming_region}
 
     async def _chat(self, msg: Message, text: str) -> None:
         await self._say_reply(msg, t("sit.chat"), {"message": text})

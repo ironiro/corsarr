@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from typing import Any
 
@@ -174,6 +175,23 @@ class Jellyseerr:
                 seen["logo"] = logo
         ordered = sorted(found.values(), key=lambda p: (p["prio"], p["name"].casefold()))
         return [{k: v for k, v in p.items() if k != "prio"} for p in ordered]
+
+    @staticmethod
+    def match_providers(names: list[str], providers: list[dict]) -> tuple[list[dict], list[str]]:
+        """Streaming services named in the chat ("Prime", "Disney+") -> entries of `providers` (most popular
+        first, so "Netflix" means Netflix, not "Netflix basic with Ads"). Returns (matched, not found)."""
+        def norm(s: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", s.lower().replace("+", "plus"))
+        matched, missing = [], []
+        for name in names:
+            q = norm(name)
+            hit = next((p for p in providers if norm(p["name"]) == q), None) if q else None
+            hit = hit or next((p for p in providers if q and q in norm(p["name"])), None)
+            if hit and hit not in matched:
+                matched.append(hit)
+            elif not hit:
+                missing.append(name)
+        return matched, missing
 
     async def details(self, media_type: str, tmdb_id: int) -> dict:
         return await self._get(f"/{media_type}/{tmdb_id}")

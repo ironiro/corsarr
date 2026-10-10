@@ -109,6 +109,7 @@ who is in the group from who writes to it or presses its buttons.
 | `@bot ask about series only after 3 weeks` | series pause set to 21 days |
 | `@bot ask about abandoned movies after 5 days` | follow-up for abandoned movies set to 5 days |
 | `@bot no more pirate` · `@bot switch grandma on` · `@bot only the cat` | characters off/on |
+| `@bot we have Netflix and Disney+` · `@bot we cancelled Prime` · `@bot we got Apple TV+` | your streaming services (shown on cards for new titles) |
 
 The same settings are in the web interface under *Configuration → Bot behaviour*.
 
