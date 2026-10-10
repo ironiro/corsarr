@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import collections
 import logging
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -95,14 +98,30 @@ class Health:
             self.error(service, describe_error(exc))
 
 
+# A line as the log file's formatter writes it (main.setup_logging):
+# "2026-01-31 18:04:05,123 INFO corsarr.bot: message". Lines that don't match continue the entry before.
+LOG_LINE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) "
+                      r"(DEBUG|INFO|WARNING|ERROR|CRITICAL) (\S+): (.*)")
+
+
 class EventBuffer(logging.Handler):
-    """Keeps the last log records in memory for the GUI's event log."""
+    """Keeps the last log records in memory for the GUI's event log.
+
+    After a restart, `restore()` fills it from the tail of the log file, so the entries from before stay
+    visible; a marker entry (`"restart": True`) stands at each point where the program started.
+    """
 
     def __init__(self, capacity: int = 1000) -> None:
         super().__init__()
         self.records: collections.deque[dict] = collections.deque(maxlen=capacity)
         self._next_id = 1
         self._lock_ = threading.Lock()
+        # Ids start at 1 again in every process; the GUI notices the new value and loads everything anew.
+        self.boot = f"{time.time():.6f}"
+
+    def _append(self, entry: dict) -> None:
+        self.records.append({"id": self._next_id, **entry})
+        self._next_id += 1
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -111,17 +130,96 @@ class EventBuffer(logging.Handler):
                 exc = record.exc_info[1]
                 message += f" – {type(exc).__name__}: {exc}"
             with self._lock_:
-                self.records.append({
-                    "id": self._next_id, "ts": record.created, "level": record.levelname,
-                    "logger": record.name.removeprefix("corsarr."), "message": message,
-                })
-                self._next_id += 1
+                self._append({"ts": record.created, "level": record.levelname,
+                              "logger": record.name.removeprefix("corsarr."), "message": message})
         except Exception:  # never let logging break the bot
             self.handleError(record)
 
     def since(self, after: int = 0, limit: int = 1000) -> list[dict]:
         with self._lock_:
             return [r for r in self.records if r["id"] > after][-limit:]
+
+    def restore(self, log_file: Path, start_messages: tuple[str, ...] = (),
+                fallback_start: tuple[str, ...] = ()) -> int:
+        """Fill the buffer from the tail of `log_file` (and its rotated predecessor `.1` if needed).
+
+        `start_messages`: the line each program start writes; a restart marker goes before it.
+        `fallback_start`: message prefixes that mark a start in older files without that line.
+        Returns the number of restored entries; a marker for the current start follows them.
+        """
+        capacity = self.records.maxlen or 1000
+        entries: list[dict] = []
+        for path in (log_file, log_file.with_name(log_file.name + ".1")):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                break  # no file (yet): nothing (more) to restore
+            entries = parse_log(text, start_messages, fallback_start) + entries
+            if len(entries) >= capacity:
+                break
+        entries = entries[-(capacity - 1):]
+        while entries and entries[0].get("restart"):
+            entries.pop(0)  # a divider above everything says nothing
+        if not entries:
+            return 0
+        with self._lock_:
+            for entry in entries:
+                self._append(entry)
+            self._append(_marker(time.time()))
+        return sum(not e.get("restart") for e in entries)
+
+
+def _marker(ts: float) -> dict:
+    return {"ts": ts, "level": "", "logger": "", "message": "", "restart": True}
+
+
+def parse_log(text: str, start_messages: tuple[str, ...] = (),
+              fallback_start: tuple[str, ...] = ()) -> list[dict]:
+    """Entries (without ids) in the event buffer's shape from the log file's text.
+
+    Continuation lines (multi-line messages, tracebacks) belong to the entry before; of a traceback only
+    its last line ("ValueError: ...") is kept, the same way `EventBuffer.emit` shows exceptions.
+    """
+    entries: list[dict] = []
+    in_traceback = False
+    exc_line = ""
+    started = False  # a start line was seen and the fallback line of the same start not yet
+
+    def finish() -> None:
+        if entries and exc_line:
+            entries[-1]["message"] += f" – {exc_line}"
+
+    for line in text.splitlines():
+        m = LOG_LINE.fullmatch(line)
+        if m is None:
+            if not entries:
+                continue  # the rest of an entry whose beginning lies in the older file
+            if line.startswith("Traceback (most recent call last):"):
+                in_traceback = True
+            elif in_traceback:
+                if line and not line[0].isspace() and not line.startswith("During handling") \
+                        and not line.startswith("The above exception"):
+                    exc_line = line
+            else:
+                entries[-1]["message"] += "\n" + line
+            continue
+        finish()
+        in_traceback, exc_line = False, ""
+        stamp, level, name, message = m.groups()
+        try:
+            ts = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S,%f").timestamp()
+        except ValueError:
+            continue
+        if message in start_messages:
+            entries.append(_marker(ts))
+            started = True
+        elif message.startswith(fallback_start):  # False for an empty tuple
+            if not started:
+                entries.append(_marker(ts))
+            started = False
+        entries.append({"ts": ts, "level": level, "logger": name.removeprefix("corsarr."), "message": message})
+    finish()
+    return entries
 
 
 health = Health()

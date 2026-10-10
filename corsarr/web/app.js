@@ -13,6 +13,7 @@ const dirty = {};           // field name -> new value
 const resets = new Set();   // fields whose GUI value should be dropped
 let events = [];
 let lastEventId = 0;
+let eventsBoot = null;  // changes when the program restarted: its ids start anew
 let timers = [];
 
 // --- helpers -------------------------------------------------------------------
@@ -398,7 +399,14 @@ function viewEvents(main) {
 
 async function pollEvents() {
   try {
-    const data = await api(`/api/events?after=${lastEventId}`);
+    let data = await api(`/api/events?after=${lastEventId}`);
+    if (data.boot !== eventsBoot) {
+      if (eventsBoot !== null) data = await api("/api/events?after=0");
+      eventsBoot = data.boot;
+      events = [];
+      lastEventId = 0;
+      if (!data.events.length) renderEvents();
+    }
     if (data.events.length) {
       events = events.concat(data.events).slice(-1000);
       lastEventId = events[events.length - 1].id;
@@ -410,9 +418,11 @@ async function pollEvents() {
 function renderEvents() {
   const log = document.getElementById("log");
   if (!log) return;
-  const shown = events.filter(e => (LEVELS[e.level] || 0) >= levelFilter &&
+  const shown = events.filter(e => e.restart || (LEVELS[e.level] || 0) >= levelFilter &&
     (!search || e.message.toLowerCase().includes(search) || e.logger.toLowerCase().includes(search)));
-  const rows = shown.map(e => h("div", { class: `ev ${e.level}` },
+  // Restart dividers stay visible under every filter, but not several in a row or at the edges.
+  const kept = shown.filter((e, i) => !e.restart || (i > 0 && !shown[i - 1].restart && i < shown.length - 1));
+  const rows = kept.map(e => e.restart ? h("div", { class: "ev restart", title: new Date(e.ts * 1000).toLocaleString() }, T.events_restart) : h("div", { class: `ev ${e.level}` },
     h("span", { class: "ts", title: new Date(e.ts * 1000).toLocaleString() }, clock(e.ts)),
     h("span", { class: "lv" }, e.level),
     h("span", { class: "msg" }, h("span", { class: "src" }, e.logger), e.message)));
