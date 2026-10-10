@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import logging
 import secrets
@@ -31,6 +32,10 @@ SESSION_TTL = 7 * 24 * 3600
 RUNTIME = web.AppKey("runtime", object)
 SESSIONS = web.AppKey("sessions", dict)
 TASKS = web.AppKey("tasks", set)
+LOGIN_LOCK = web.AppKey("login_lock", asyncio.Lock)
+LOGIN_DELAY = 1.0  # seconds after a failed login; attempts wait for each other, so guessing can't run in parallel
+# Names that always lead into the home network; anything else must be listed in ALLOWED_HOSTS.
+LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".home.arpa", ".internal", ".test", ".fritz.box")
 
 
 # --- helpers ---------------------------------------------------------------------
@@ -67,8 +72,37 @@ def _session_valid(request: web.Request) -> bool:
     return True
 
 
+def host_allowed(host: str, cfg) -> bool:
+    """Whether the Host header names this server: an IP address, localhost, a local domain, the name the
+    server listens on or one from ALLOWED_HOSTS. A browser lured to a public name that resolves to a
+    private address (DNS rebinding) sends that name – and gets refused."""
+    name = (host or "").strip().lower()
+    if name.startswith("["):  # [IPv6]:port
+        name = name[1:name.find("]")] if "]" in name else ""
+    elif name.count(":") == 1:
+        name = name.rsplit(":", 1)[0]
+    if not name:
+        return False
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    name = name.rstrip(".")
+    # Names without a dot (Docker service names like "corsarr", Windows host names) only resolve inside
+    # the home network, so they can't be a public name pointed at it.
+    if "." not in name or name.endswith(LOCAL_SUFFIXES):
+        return True
+    allowed = {h.strip().lower() for h in cfg.get("ALLOWED_HOSTS").split(",")}
+    allowed.add(cfg.webhook_host.lower())  # a name to listen on is a name to be reached under
+    return name in allowed - {""}
+
+
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
+    if not host_allowed(request.host, _rt(request).cfg):
+        log.warning(t("log.host_rejected", host=request.host, remote=_remote(request)))
+        return web.Response(status=403, text="unknown host")
     path = request.path
     if path.startswith("/api/") and path not in ("/api/login", "/api/i18n"):
         # Login only when ADMIN_PASSWORD is set; by default the GUI is open (meant for the home network).
@@ -162,15 +196,13 @@ async def api_i18n(_: web.Request) -> web.Response:
 
 
 async def api_login(request: web.Request) -> web.Response:
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        body = {}
+    body = await _json_body(request, required=True)
     given = str(body.get("password", "")).encode()
     expected = _rt(request).cfg.admin_password.encode()
     if not expected or not hmac.compare_digest(given, expected):
         log.warning(t("log.gui_login_failed", remote=_remote(request)))
-        await asyncio.sleep(1)  # slows down guessing
+        async with request.app[LOGIN_LOCK]:  # slows down guessing – also many attempts at once
+            await asyncio.sleep(LOGIN_DELAY)
         return web.json_response({"error": t("gui.login_failed")}, status=403)
     token = secrets.token_urlsafe(32)
     request.app[SESSIONS][token] = time.time() + SESSION_TTL
@@ -228,12 +260,28 @@ async def api_restart(request: web.Request) -> web.Response:
     return web.json_response(status_payload(rt))
 
 
-async def _json_body(request: web.Request) -> dict:
+async def _json_body(request: web.Request, required: bool = False) -> dict:
+    """The JSON object in the body; {} when there is none – or 400 when `required`."""
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return {}
-    return body if isinstance(body, dict) else {}
+        body = None
+    if isinstance(body, dict):
+        return body
+    if required:
+        raise web.HTTPBadRequest(text="invalid json")
+    return {}
+
+
+def _form_key(cfg, url_name: str, key_name: str, url: str, key: str) -> str:
+    """The key typed into the form, else the saved one – but the saved key only goes to the saved address:
+    with another address typed in, the form has to supply the key too (otherwise anyone with access to the
+    interface could send the keys to a server of their own)."""
+    if key:
+        return key
+    if url.rstrip("/") not in ("", cfg.get(url_name).rstrip("/")):
+        return ""
+    return cfg.get(key_name)
 
 
 async def api_models(request: web.Request) -> web.Response:
@@ -246,8 +294,9 @@ async def api_models(request: web.Request) -> web.Response:
         return web.json_response({"models": [], "error": t("cfg.not_choice", name="LLM_PROVIDER",
                                                               choices=", ".join(config.PROVIDERS))})
     names = config.PROVIDER_FIELDS[provider]
-    key = str(body.get("api_key") or (rt.cfg.get(names["key"]) if "key" in names else ""))
     url = str(body.get("url") or (rt.cfg.get(names["url"]) if "url" in names else ""))
+    key = _form_key(rt.cfg, names.get("url", ""), names["key"], str(body.get("url") or ""),
+                    str(body.get("api_key") or "")) if "key" in names else ""
     if "key" in names and not key:
         return web.json_response({"models": [], "error": t("gui.options_need_key")})
     try:
@@ -269,7 +318,7 @@ async def api_jellyfin_users(request: web.Request) -> web.Response:
     rt = _rt(request)
     body = await _json_body(request)
     url = str(body.get("url") or rt.cfg.jellyfin_url).rstrip("/")
-    key = str(body.get("api_key") or rt.cfg.jellyfin_api_key)
+    key = _form_key(rt.cfg, "JELLYFIN_URL", "JELLYFIN_API_KEY", url, str(body.get("api_key") or ""))
     if not url or not key:
         return web.json_response({"users": [], "error": t("gui.options_need_jellyfin")})
     try:
@@ -289,7 +338,7 @@ async def api_streaming(request: web.Request) -> web.Response:
     rt = _rt(request)
     body = await _json_body(request)
     url = str(body.get("url") or rt.cfg.jellyseerr_url).rstrip("/")
-    key = str(body.get("api_key") or rt.cfg.jellyseerr_api_key)
+    key = _form_key(rt.cfg, "JELLYSEERR_URL", "JELLYSEERR_API_KEY", url, str(body.get("api_key") or ""))
     region = str(body.get("region") or rt.cfg.streaming_region).upper()
     if not url or not key:
         return web.json_response({"regions": [], "providers": [], "region": region,
@@ -356,17 +405,25 @@ async def api_setup_test(request: web.Request) -> web.Response:
     body = await _json_body(request)
     given = body.get("values") if isinstance(body.get("values"), dict) else {}
     value = lambda name: str(given.get(name) or rt.cfg.get(name)).strip()
+    typed = lambda name: str(given.get(name) or "").strip()  # only what is in the form
+
+    def key(url_name: str, key_name: str) -> str:
+        if not (found := _form_key(rt.cfg, url_name, key_name, typed(url_name), typed(key_name))):
+            raise setup.SetupError("cfg.missing", name=key_name)
+        return found
+
     service = body.get("service")
     try:
         if service == "jellyfin":
-            detail = await setup.test_jellyfin(value("JELLYFIN_URL"), value("JELLYFIN_API_KEY"), value("JELLYFIN_USER"))
+            detail = await setup.test_jellyfin(value("JELLYFIN_URL"), key("JELLYFIN_URL", "JELLYFIN_API_KEY"),
+                                               value("JELLYFIN_USER"))
         elif service == "jellyseerr":
-            detail = await setup.test_seerr(value("JELLYSEERR_URL"), value("JELLYSEERR_API_KEY"))
+            detail = await setup.test_seerr(value("JELLYSEERR_URL"), key("JELLYSEERR_URL", "JELLYSEERR_API_KEY"))
         elif service == "llm":
             provider = value("LLM_PROVIDER") or config.RECOMMENDED_PROVIDER
             names = config.PROVIDER_FIELDS.get(provider, {})
             detail = await setup.test_llm(provider, value(names.get("model", "")) if names else "",
-                                          value(names["key"]) if "key" in names else "",
+                                          key(names.get("url", ""), names["key"]) if "key" in names else "",
                                           value(names["url"]) if "url" in names else "")
         else:
             return web.json_response({"ok": False, "error": "unknown service"}, status=400)
@@ -395,9 +452,13 @@ async def api_setup_arr(request: web.Request) -> web.Response:
     if kind not in ("sonarr", "radarr"):
         return web.json_response({"ok": False, "error": "unknown service"}, status=400)
     hook = setup.webhook_urls(str(body.get("base") or _base_url(request)), rt.cfg.webhook_secret)[kind]
+    url_name, key_name = f"{kind.upper()}_URL", f"{kind.upper()}_API_KEY"
+    url = str(body.get("url") or rt.cfg.get(url_name))
+    key = _form_key(rt.cfg, url_name, key_name, url, str(body.get("api_key") or ""))
+    if not key:
+        return web.json_response({"ok": False, "error": t("cfg.missing", name=key_name)}, status=400)
     try:
-        result = await setup.connect_arr(kind, str(body.get("url") or rt.cfg.get(f"{kind.upper()}_URL")),
-                                         str(body.get("api_key") or rt.cfg.get(f"{kind.upper()}_API_KEY")), hook)
+        result = await setup.connect_arr(kind, url, key, hook)
     except setup.SetupError as e:
         return _setup_error(e)
     log.info(t("log.arr_connected", service=kind.capitalize()))
@@ -431,7 +492,7 @@ async def api_restore(request: web.Request) -> web.Response:
     if not isinstance(upload, web.FileField):
         return web.json_response({"error": t("backup.not_a_backup")}, status=400)
     try:
-        manifest, settings, database = backup.read(upload.file.read(), password)
+        manifest, settings, database = await asyncio.to_thread(backup.read, upload.file.read(), password)
     except backup.BackupError as e:
         log.warning(t("log.restore_failed", remote=_remote(request), error=t(e.key, **e.values)))
         return web.json_response({"error": t(e.key, **e.values)}, status=400)
@@ -483,9 +544,9 @@ async def api_config(request: web.Request) -> web.Response:
 
 async def api_config_save(request: web.Request) -> web.Response:
     rt = _rt(request)
-    body = await request.json()
-    values: dict = body.get("values") or {}
-    reset = set(body.get("reset") or [])
+    body = await _json_body(request, required=True)
+    values: dict = body.get("values") if isinstance(body.get("values"), dict) else {}
+    reset = {str(n) for n in body.get("reset") or []} if isinstance(body.get("reset"), list) else set()
     overrides = config.read_overrides(rt.cfg.data_dir)
     errors: dict[str, str] = {}
     changed: list[str] = []
@@ -530,18 +591,14 @@ async def api_config_save(request: web.Request) -> web.Response:
                         and n != "ADMIN_PASSWORD" for n in changed)
     if needs_restart:
         await rt.restart()
-    elif hasattr(rt, "apply_live_config"):
+    else:
         rt.apply_live_config()  # e.g. streaming services or the budget apply right away
-    else:  # test runtimes
-        rt.cfg = config.load()
-        if seerr := getattr(rt, "seerr", None):
-            seerr.set_streaming(rt.cfg.streaming_region, rt.cfg.streaming_ids)
     return web.json_response({"restart": needs_restart, "app_restart": app_restart, **config_payload(rt)})
 
 
 async def api_settings_save(request: web.Request) -> web.Response:
     rt = _rt(request)
-    body: dict = await request.json()
+    body = await _json_body(request, required=True)
     applied = {}
     for key, value in body.items():
         if key not in DEFAULT_SETTINGS:
@@ -582,6 +639,7 @@ def build_app(runtime: "Runtime") -> web.Application:
     app[RUNTIME] = runtime
     app[SESSIONS] = {}
     app[TASKS] = set()
+    app[LOGIN_LOCK] = asyncio.Lock()
     app.on_response_prepare.append(_font_headers)
     app.router.add_post("/jellyfin", jellyfin_webhook)
     app.router.add_post("/sonarr", sonarr_webhook)

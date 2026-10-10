@@ -6,7 +6,7 @@ are counted. The optional monthly budget (MONTHLY_BUDGET_USD) works on the estim
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from . import llm
 from .config import Config
@@ -75,8 +75,3 @@ def budget_reached(db: DB, cfg: Config) -> str | None:
     if budget and cost is not None and cost >= budget:
         return t("check.budget_reached", cost=usd(cost), budget=usd(budget))
     return None
-
-
-def next_month(at: datetime | None = None) -> datetime:
-    start = month_start(at)
-    return (start + timedelta(days=32)).replace(day=1)

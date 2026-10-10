@@ -10,12 +10,15 @@ remembered, catch_up() reads their history and records imports whose webhook nev
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from .db import DB, iso, now, parse_iso
 from .i18n import t
+
+log = logging.getLogger(__name__)
 
 FRESH_AGE = timedelta(days=7)          # aired within this window = a "new episode" of a running show
 QUIET_FRESH = timedelta(minutes=2)     # e.g. double episodes arrive together
@@ -113,13 +116,18 @@ def due_messages(db: DB) -> list[tuple[list[int], str]]:
         groups.setdefault(row["group_key"], []).append(row)
     result = []
     for rows in groups.values():
-        last = max(parse_iso(r["created_at"]) for r in rows)
-        if rows[0]["kind"] == "movie":
-            quiet = QUIET_MOVIE
-        else:
-            quiet = QUIET_FRESH if all(r["fresh"] for r in rows) else QUIET_BACKFILL
-        if now() - last >= quiet:
-            result.append(([r["id"] for r in rows], _message(db, rows)))
+        ids = [r["id"] for r in rows]
+        try:
+            last = max(parse_iso(r["created_at"]) for r in rows)
+            if rows[0]["kind"] == "movie":
+                quiet = QUIET_MOVIE
+            else:
+                quiet = QUIET_FRESH if all(r["fresh"] for r in rows) else QUIET_BACKFILL
+            if now() - last >= quiet:
+                result.append((ids, _message(db, rows)))
+        except Exception:  # one odd row (e.g. broken fields) must not hold up the other notifications
+            log.exception(t("log.notify_build_failed", title=rows[0].get("title")))
+            db.mark_imports_notified(ids)
     return result
 
 
@@ -134,7 +142,7 @@ def _message(db: DB, rows: list[dict]) -> str:
     episodes = sorted({(r["season"] or 0, r["episode"] or 0): r for r in rows}.values(),
                       key=lambda r: (r["season"] or 0, r["episode"] or 0))
     if all(r["fresh"] for r in episodes) and len(episodes) <= LIST_EPISODES:
-        names = [f"S{r['season']:02d}E{r['episode']:02d}"
+        names = [f"S{r['season'] or 0:02d}E{r['episode'] or 0:02d}"
                  + (" " + t("notify.episode_title", title=r["episode_title"]) if r["episode_title"] else "")
                  for r in episodes]
         return t("notify.episodes", series=title, episodes=", ".join(names)) + suffix

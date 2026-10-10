@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import shutil
 import sqlite3
 import tempfile
@@ -22,10 +23,15 @@ import pyzipper
 
 from . import config, updates
 from .db import SCHEMA_VERSION
+from .i18n import t
+
+log = logging.getLogger(__name__)
 
 APP = "corsarr"
 MIN_PASSWORD = 8
 MAX_SIZE = 200 * 1024 * 1024  # bytes; far more than a household's database
+MAX_UNPACKED = 500 * 1024 * 1024  # what the files inside may add up to – stops zip bombs before unpacking
+MAX_RATIO = 1000  # unpacked : packed; a nearly empty SQLite file shrinks a few hundredfold, a bomb far more
 BAD_ZIP = (zipfile.BadZipFile, pyzipper.BadZipFile, ValueError, EOFError)  # pyzipper has its own BadZipFile
 
 
@@ -80,6 +86,10 @@ def read(data: bytes, password: str) -> tuple[dict, dict, bytes | None]:
         names = set(zf.namelist())
         if not {"manifest.json", "config.json"} <= names:
             raise BackupError("backup.not_a_backup")
+        # The declared sizes bound what zipfile unpacks, so checking them is enough.
+        unpacked = sum(zf.getinfo(n).file_size for n in names)
+        if unpacked > MAX_UNPACKED or unpacked > MAX_RATIO * max(len(data), 1):
+            raise BackupError("backup.too_large")
         # Only encrypted backups: a plain zip with the right names is not something Corsarr made.
         if not all(zf.getinfo(n).flag_bits & 0x1 for n in names):
             raise BackupError("backup.not_encrypted")
@@ -94,7 +104,11 @@ def read(data: bytes, password: str) -> tuple[dict, dict, bytes | None]:
             raise BackupError("backup.not_a_backup") from None
     if not isinstance(manifest, dict) or manifest.get("app") != APP or not isinstance(settings, dict):
         raise BackupError("backup.not_a_backup")
-    if int(manifest.get("schema_version", 0)) > SCHEMA_VERSION:
+    try:
+        schema_version = int(manifest.get("schema_version", 0))
+    except (TypeError, ValueError):
+        raise BackupError("backup.not_a_backup") from None
+    if schema_version > SCHEMA_VERSION:
         raise BackupError("backup.too_new", version=manifest.get("version") or "?")
     return manifest, settings, database
 
@@ -110,7 +124,21 @@ def restore(data_dir: Path, settings: dict, database: bytes | None) -> Path:
         tmp = data_dir / "corsarr.db.restoring"
         tmp.write_bytes(database)
         tmp.replace(data_dir / "corsarr.db")
-    overrides = config._migrate_overrides(settings)
-    config.write_overrides(data_dir, {k: str(v) for k, v in overrides.items()
-                                      if k in config.FIELD_BY_NAME and config.FIELD_BY_NAME[k].editable})
+    config.write_overrides(data_dir, clean_settings(config._migrate_overrides(settings)))
     return keep
+
+
+def clean_settings(settings: dict) -> dict[str, str]:
+    """The editable, valid values of a backup's config.json – checked like input from the configuration
+    page, so a tampered or hand-edited backup can't put something there the GUI would refuse."""
+    clean: dict[str, str] = {}
+    for name, raw in settings.items():
+        f = config.FIELD_BY_NAME.get(name)
+        value = str(raw).strip() if isinstance(raw, (str, int, float)) else ""
+        if f is None or not f.editable or not value:
+            continue
+        if err := config.validate(f, value):
+            log.warning(t("log.restore_value_dropped", name=name, error=err))
+            continue
+        clean[name] = value
+    return clean

@@ -62,7 +62,10 @@ class CorsarrBot:
         self.username = ""
         self.down = False
         self._last_outage_reply = 0.0
+        self._probing = False  # one outage probe at a time – else "back again" would be posted twice
         self.genres_loaded = False
+        self._card_locks: dict[int, asyncio.Lock] = {}  # per carousel: one message edit at a time
+        self._nav_wanted: dict[int, int] = {}           # per carousel: the page the newest tap asked for
 
     # --- helpers -------------------------------------------------------------
     @property
@@ -176,14 +179,14 @@ class CorsarrBot:
         await self.translations.ensure(lang)
 
     async def _handle(self, msg: Message, text: str, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if self.down and not await self._probe():
-            if time.monotonic() - self._last_outage_reply > 1800:
-                self._last_outage_reply = time.monotonic()
-                await msg.reply_text(t("bot.outage"))
-            return
-        await self.load_genres()
-        await context.bot.send_chat_action(self.cfg.chat_id, ChatAction.TYPING)
         try:
+            if self.down and not await self._probe():
+                if time.monotonic() - self._last_outage_reply > 1800:
+                    self._last_outage_reply = time.monotonic()
+                    await msg.reply_text(t("bot.outage"))
+                return
+            await self.load_genres()
+            await context.bot.send_chat_action(self.cfg.chat_id, ChatAction.TYPING)
             reply_to = msg.reply_to_message
             fb_req = self.db.request_by_message(reply_to.message_id) if reply_to else None
             if fb_req:
@@ -213,6 +216,12 @@ class CorsarrBot:
         except httpx.HTTPError as e:
             log.exception(t("log.backend_error"))
             await self._say_reply(msg, t("sit.backend_error"), {"error": type(e).__name__})
+        except Exception:  # whatever else went wrong: they must not be left waiting for an answer
+            log.exception(t("log.handle_failed"))
+            try:
+                await msg.reply_text(t("bot.failed"))
+            except TelegramError as e:
+                log.warning(t("log.not_editable", error=e))
 
     async def _say_reply(self, msg: Message, situation: str, facts: dict | None = None) -> None:
         try:
@@ -289,12 +298,13 @@ class CorsarrBot:
         try:
             sent = await self.bot.send_photo(self.cfg.chat_id, photo, caption=caption,
                                              parse_mode=ParseMode.HTML, reply_markup=markup)
+            self._remember_photo(row["id"], sent)
         except TelegramError as e:  # e.g. Telegram could not fetch the poster URL
             log.warning(t("log.card_failed", title=row["title"], error=e))
             sent = await self.bot.send_photo(self.cfg.chat_id, placeholder_png(), caption=caption,
                                              parse_mode=ParseMode.HTML, reply_markup=markup)
+            # the stand-in is not remembered as the poster: the next page change tries the real one again
         self.db.set_carousel(cid, message_id=sent.message_id)
-        self._remember_photo(row["id"], sent)
 
     async def _page(self, cid: int, pos: int):
         """Everything needed to show page `pos`: (suggestion row, photo, caption, buttons)."""
@@ -348,40 +358,44 @@ class CorsarrBot:
     def _card_lock(self, cid: int) -> asyncio.Lock:
         """One edit per card at a time: Telegram cancels an edit when the next one for the same message
         arrives before it finished ("Canceled by new edit message request")."""
-        locks = self.__dict__.setdefault("_card_locks", {})
-        return locks.setdefault(cid, asyncio.Lock())
+        return self._card_locks.setdefault(cid, asyncio.Lock())
 
     async def _cb_nav(self, q, cid: int, pos: int) -> None:
         await q.answer()  # right away – fetching the poster takes a moment, and a spinning button invites taps
         if self.db.carousel(cid) is None:
             return
-        wanted = self.__dict__.setdefault("_nav_wanted", {})
-        wanted[cid] = pos
+        self._nav_wanted[cid] = pos
+        await self._show_wanted(q.message, cid)
+
+    async def _show_wanted(self, message, cid: int) -> None:
+        """Show the page the newest tap asked for – unless someone else holds the card's lock: whoever has it
+        (a page change, a decision) shows the wish when done, so a tap during an edit is never lost."""
         lock = self._card_lock(cid)
         if lock.locked():
-            return  # the page change in progress picks up the newest wish when it is done
+            return
         async with lock:
-            while (target := wanted.pop(cid, None)) is not None:
-                await self._show_page(q.message, cid, target)
+            while (target := self._nav_wanted.pop(cid, None)) is not None:
+                await self._show_page(message, cid, target)
 
     async def _show_page(self, message, cid: int, pos: int) -> None:
         row, photo, caption, markup = await self._page(cid, pos)
         try:
             edited = await message.edit_media(
                 InputMediaPhoto(photo, caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
+            self._remember_photo(row["id"], edited)
         except TelegramError as e:
             text = str(e).lower()
             if "not modified" in text or "canceled by new edit" in text:
                 return  # already showing this page / a newer change took over
             log.warning(t("log.not_editable", error=e))
             try:  # e.g. Telegram could not fetch the poster: show the page with a placeholder
-                edited = await message.edit_media(
+                await message.edit_media(
                     InputMediaPhoto(placeholder_png(), caption=caption, parse_mode=ParseMode.HTML), reply_markup=markup)
             except TelegramError as e2:
                 log.warning(t("log.not_editable", error=e2))
                 return
+            # the stand-in is not remembered as the poster: the next page change tries the real one again
         self.db.set_carousel(cid, position=pos % len(self.db.carousel_pages(cid)))
-        self._remember_photo(row["id"], edited)
 
     async def _decided(self, q, sid: int, note: str) -> None:
         """Show a decision: redraw the card's current page, or append a note on older single cards."""
@@ -390,13 +404,19 @@ class CorsarrBot:
         if car is None:
             await self._mark(q, note)
             return
-        ids = [r["id"] for r in self.db.carousel_pages(car["id"])]
-        async with self._card_lock(car["id"]):  # not in the middle of a page change
-            _, _, caption, markup = await self._page(car["id"], ids.index(sid))
-            try:
-                await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
-            except TelegramError as e:
-                log.warning(t("log.not_editable", error=e))
+        cid = car["id"]
+        async with self._card_lock(cid):  # not in the middle of a page change
+            # The page shown *now* – someone may have paged on since the button was pressed. Then there is
+            # nothing to redraw: the note appears when they page back (the page is drawn from the database).
+            pos = self.db.carousel(cid)["position"]
+            rows = self.db.carousel_pages(cid)
+            if rows[pos % len(rows)]["id"] == sid:
+                _, _, caption, markup = await self._page(cid, pos)
+                try:
+                    await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
+                except TelegramError as e:
+                    log.warning(t("log.not_editable", error=e))
+        await self._show_wanted(q.message, cid)  # a tap that arrived meanwhile
 
     # --- film series: one message listing all parts, one button requests the missing ones ----------
     async def _send_collection(self, coll: FilmCollection, intro: str) -> None:
@@ -465,6 +485,7 @@ class CorsarrBot:
         # Mark first: both people may press the button at the same time.
         for s in missing:
             self.db.set_suggestion_status(s["id"], "requested", who)
+        await q.answer()  # right away – the requests take a moment; the result goes into the message
         results = await asyncio.gather(*(self.seerr.request("movie", s["tmdb_id"]) for s in missing),
                                        return_exceptions=True)
         requested, failed = [], 0
@@ -482,15 +503,13 @@ class CorsarrBot:
             else:
                 requested.append(s)
                 log.info(t("log.requested", title=s["title"], who=who))
-        if failed:
-            await q.answer(t("bot.coll_failed", n=failed), show_alert=True)
-        else:
-            await q.answer(t("bot.coll_requested", n=len(requested)))
         caption, markup = self._collection_view(col_id, card)
         try:
             await q.message.edit_caption(caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
         except TelegramError as e:
             log.warning(t("log.not_editable", error=e))
+        if failed:
+            await self.post(t("bot.coll_failed", n=failed), reply_to_message_id=q.message.message_id)
         if not requested:
             return
         try:
@@ -568,8 +587,10 @@ class CorsarrBot:
             situation = t("sit.ask_movie", title=title)
         elif req["kind"] == "season":
             season = req["extra"].get("season")
-            what = (t("sit.whole_series") if req["extra"].get("series_done")
-                    else t("sit.season_n", season=season))
+            if req["extra"].get("series_done"):
+                what = t("sit.whole_series")
+            else:  # Jellyfin may not know the season number (specials, odd metadata)
+                what = t("sit.season_n", season=season) if season is not None else t("sit.a_season")
             situation = t("sit.ask_season", what=what, title=title)
         elif req["kind"] == "series_pause":
             situation = t("sit.ask_pause", title=title, days=settings["series_pause_days"])
@@ -610,7 +631,9 @@ class CorsarrBot:
         if req["kind"] == "season":
             if extra.get("series_done"):
                 return t("bot.head_series_done", title=title)
-            return t("bot.head_season", title=title, season=extra.get("season"))
+            if extra.get("season") is None:
+                return t("bot.head_series", title=title)
+            return t("bot.head_season", title=title, season=extra["season"])
         if req["kind"] == "series_pause":
             return t("bot.head_pause", title=title)
         return t("bot.head_abort", title=title, pct=round(100 * extra.get("pct", 0)))
@@ -676,6 +699,8 @@ class CorsarrBot:
                 await q.answer()
         except LLMUnavailable as e:
             await self.enter_outage(str(e))
+        except LLMFailed as e:  # the button did its job – only the character's comment is missing
+            log.warning(t("log.llm_failed", provider=self.llm.label, error=e))
 
     async def _show_ratings(self, q, req: dict, keep_buttons: bool) -> None:
         """One line "🗳️ 👍 Sam · 👎 Alex" under the question, updated with every rating; the buttons stay
@@ -718,19 +743,21 @@ class CorsarrBot:
         who = q.from_user.first_name if q.from_user else t("bot.someone")
         # Mark first: both people may press the button at the same time.
         self.db.set_suggestion_status(sid, "requested", who)
+        await q.answer()  # right away – the request takes a moment; the result goes into the card
         try:
             await self.seerr.request(s["media_type"], s["tmdb_id"])
-        except httpx.HTTPError as e:
-            self.db.set_suggestion_status(sid, s["status"])
-            if isinstance(e, httpx.HTTPStatusError):
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 409:  # 409: already requested in Jellyseerr itself – on its way all the same
+                self.db.set_suggestion_status(sid, s["status"])
                 log.warning(t("log.request_failed", title=s["title"], status=e.response.status_code,
                               body=e.response.text))
-                await q.answer(t("bot.request_failed"), show_alert=True)
-            else:
-                await q.answer(t("bot.seerr_unreachable"), show_alert=True)
+                await self._post_failure(s["title"], t("bot.request_failed"))
+                return
+        except httpx.HTTPError:
+            self.db.set_suggestion_status(sid, s["status"])
+            await self._post_failure(s["title"], t("bot.seerr_unreachable"))
             return
         log.info(t("log.requested", title=s["title"], who=who))
-        await q.answer(t("bot.requested"))
         await self._decided(q, sid, t("bot.requested_by", who=html.escape(who)))
         speaker = self.speaker()
         text = await self.llm.say(
@@ -739,6 +766,14 @@ class CorsarrBot:
         # Not as a reply: Telegram quotes the card as it looks *now*, so after paging on the quote would
         # show another title. The message names the title itself.
         await self.post(text)
+
+    async def _post_failure(self, title: str, text: str) -> None:
+        """A button's failure as a message naming the title (the button was answered already, and the card
+        may show another page by now)."""
+        try:
+            await self.post(f"<b>{html.escape(title)}</b> – {text}", parse_mode=ParseMode.HTML)
+        except TelegramError as e:
+            log.warning(t("log.not_editable", error=e))
 
     async def _cb_accept(self, q, sid: int) -> None:
         s = self.db.suggestion(sid)
@@ -768,17 +803,18 @@ class CorsarrBot:
 
     async def _cb_rating(self, q, rid: int, rating: str) -> None:
         req = self.db.request(rid)
-        if not req or req["status"] not in ("sent", "pending"):
+        if not req or req["status"] not in ("sent", "pending") or rating not in RATING_EMOJI:
             await q.answer(t("bot.already_answered"))
             return
+        await q.answer()  # right away – looking up the title's tags takes a moment; the rating shows in the message
         rater = self._rater(q.from_user)
         await self.feedback.store_rating(req, rating, rater=rater)
+        req = self.db.request(rid)  # with everyone's ratings – someone else may have rated meanwhile
         done = self._all_rated(req)
         if done:
             self.db.update_request(rid, status="answered")
         label = t(f"bot.btn_{rating}")
         log.info(t("log.rated", title=req["title"], rating=f"{label} ({rater[1] if rater else '?'})"))
-        await q.answer(t("bot.saved", label=label))
         await self._show_ratings(q, req, keep_buttons=not done)
 
     async def _cb_abort(self, q, rid: int, choice: str) -> None:
@@ -803,10 +839,15 @@ class CorsarrBot:
 
     # --- jobs ----------------------------------------------------------------------
     async def _probe(self) -> bool:
+        if self._probing:
+            return False  # a probe is under way (job and a message at once) – it posts "back" once
+        self._probing = True
         try:
             await self.llm.ping()
         except (LLMUnavailable, LLMFailed):
             return False
+        finally:
+            self._probing = False
         self.down = False
         log.info(t("log.llm_back", provider=self.llm.label))
         await self.post(t("bot.recovered"))

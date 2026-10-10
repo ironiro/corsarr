@@ -218,7 +218,7 @@ def test_button_requests_only_the_missing_parts_and_shows_who(db):
     assert seerr.requested == [("movie", 3), ("movie", 4)]  # not the library part, not the pending one
     assert db.was_requested("movie", 3) and db.was_requested("movie", 4)  # Radarr note "via Corsarr" works
     assert not db.was_requested("movie", 1)
-    assert q.answers == [("2 angefragt ✅", False)]
+    assert q.answers == [(None, False)]  # answered right away, the result is in the message
     caption, markup = q.message.caption_edits[0]
     assert "📥 Part 3 (2000) · angefragt von Sam" in caption and "📥 Part 4 (2000) · angefragt von Sam" in caption
     assert markup is None  # nothing missing any more: the button is gone
@@ -235,7 +235,8 @@ def test_a_failed_part_stays_missing_and_an_existing_request_counts(db):
     run(bot._send_collection(saga(), ""))
     q = FakeQuery("col:1")
     run(bot._cb_collection(q, 1))
-    assert q.answers == [("1 Anfragen bei Jellyseerr fehlgeschlagen ❌", True)]
+    assert q.answers == [(None, False)]
+    assert bot.app.bot.messages[0][0] == "1 Anfragen bei Jellyseerr fehlgeschlagen ❌"  # as a message, not a toast
     assert not db.was_requested("movie", 3) and db.was_requested("movie", 4)
     caption, markup = q.message.caption_edits[0]
     assert caption.startswith("<b>Example Saga</b>")  # empty intro: no blank line on top

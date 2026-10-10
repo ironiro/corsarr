@@ -1,5 +1,7 @@
 import asyncio
 
+from telegram.error import TelegramError
+
 from corsarr.bot import CorsarrBot
 from corsarr.models import Candidate
 
@@ -58,6 +60,7 @@ def make_bot(db):
     bot.db, bot.jellyfin = db, FakeJellyfin()
     bot.cfg = type("Cfg", (), {"chat_id": -100})()
     bot.app = type("App", (), {"bot": FakeTelegram()})()
+    bot._card_locks, bot._nav_wanted = {}, {}  # set up by __init__, which the test skips
     return bot
 
 
@@ -137,3 +140,60 @@ def test_fast_taps_end_on_the_last_wished_page_without_overlapping_edits(db):
     asyncio.run(taps())
     assert overlaps[0] == 1 and len(q.answers) == 3  # every tap answered, edits one after another
     assert db.carousel(cid)["position"] == 1 and len(q.message.media_edits) <= 2
+
+
+def test_a_tap_during_a_decision_is_shown_afterwards(db):
+    """Accepting holds the card's lock while the caption is edited – a page tap arriving meanwhile must
+    not be dropped: whoever holds the lock shows the wished page when done."""
+    bot = make_bot(db)
+    asyncio.run(bot._send_carousel(picks()))
+    q = FakeQuery()
+
+    async def slow_caption(caption=None, parse_mode=None, reply_markup=None):
+        await asyncio.sleep(0.02)
+        q.message.caption_edits.append((caption, reply_markup))
+    q.message.edit_caption = slow_caption
+    sid = db.carousel_pages(1)[0]["id"]
+
+    async def both():
+        await asyncio.gather(bot._cb_accept(q, sid), bot._cb_nav(q, 1, 1))
+    asyncio.run(both())
+    assert "Ausgewählt von Sam" in q.message.caption_edits[0][0]
+    [(media, _)] = q.message.media_edits
+    assert "Runner (2026)" in media.caption and db.carousel(1)["position"] == 1
+
+
+def test_a_decision_for_a_page_no_longer_shown_only_appears_when_paging_back(db):
+    bot = make_bot(db)
+    asyncio.run(bot._send_carousel(picks()))
+    q = FakeQuery()
+    asyncio.run(bot._cb_nav(q, 1, 1))
+    sid = db.carousel_pages(1)[0]["id"]
+    asyncio.run(bot._cb_accept(q, sid))  # a late tap on the first page's button
+    assert q.message.caption_edits == []  # page 2 is shown – nothing to redraw there
+    asyncio.run(bot._cb_nav(q, 1, 0))
+    assert "Ausgewählt von Sam" in q.message.media_edits[-1][0].caption
+
+
+def test_a_stand_in_poster_is_not_remembered_as_the_poster(db):
+    bot = make_bot(db)
+    calls = []
+
+    async def send_photo(chat_id, photo, caption=None, parse_mode=None, reply_markup=None):
+        calls.append(photo)
+        if len(calls) == 1:
+            raise TelegramError("wrong file identifier")
+        return Sent(42, "file-placeholder")
+    bot.app.bot.send_photo = send_photo
+    asyncio.run(bot._send_carousel(picks()))
+    assert len(calls) == 2 and db.carousel_pages(1)[0]["file_id"] is None  # the real poster is tried again
+    q = FakeQuery()
+
+    async def edit_media(media, reply_markup=None):
+        q.message.media_edits.append((media, reply_markup))
+        if len(q.message.media_edits) == 1:
+            raise TelegramError("wrong file identifier")
+        return Sent(42, "file-placeholder")
+    q.message.edit_media = edit_media
+    asyncio.run(bot._cb_nav(q, 1, 1))
+    assert db.carousel_pages(1)[1]["file_id"] is None and db.carousel(1)["position"] == 1

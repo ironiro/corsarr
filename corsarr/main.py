@@ -32,6 +32,44 @@ from .recommender import Recommender
 log = logging.getLogger("corsarr")
 
 HEALTH_INTERVAL = 300  # seconds between automatic connection checks
+MIN_SECRET_LENGTH = 6  # shorter secrets are not masked: "pw" would mangle every "password" in the log
+
+
+class SecretFilter(logging.Filter):
+    """Replaces the configured secrets (bot token, API keys, …) with *** in every log record. The Telegram
+    library, for one, logs the Bot API address at DEBUG – and the token is part of it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.secrets: tuple[str, ...] = ()
+
+    def update(self, cfg: config.Config) -> None:
+        self.secrets = tuple(sorted({cfg.get(f.name) for f in config.FIELDS if f.secret
+                                     and len(cfg.get(f.name)) >= MIN_SECRET_LENGTH}, key=len, reverse=True))
+
+    def redact(self, text: str) -> str:
+        for secret in self.secrets:
+            text = text.replace(secret, "***")
+        return text
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not self.secrets:
+            return True
+        try:
+            record.msg, record.args = self.redact(record.getMessage()), ()
+            if record.exc_info and record.exc_info[1] is not None:
+                # Exception texts carry request addresses too; the formatter uses exc_text as it is.
+                record.exc_text = self.redact(logging.Formatter().formatException(record.exc_info))
+                exc = record.exc_info[1]
+                if (text := self.redact(str(exc))) != str(exc):  # the event log shows str(exception)
+                    stand_in = type(type(exc).__name__, (Exception,), {})(text)
+                    record.exc_info = (type(stand_in), stand_in, None)
+        except Exception:  # a malformed record is still better logged than lost
+            pass
+        return True
+
+
+secret_filter = SecretFilter()
 
 
 def setup_logging(cfg: config.Config) -> None:
@@ -48,9 +86,15 @@ def setup_logging(cfg: config.Config) -> None:
     events.restore(cfg.log_dir / "corsarr.log", start_messages=(t("log.process_start"),),
                    fallback_start=(t("log.web_listening", url=""),))
     root.addHandler(events)
+    secret_filter.update(cfg)
+    for h in (file_handler, console, events):
+        h.addFilter(secret_filter)
     # Per-request lines of the HTTP libraries (and the GUI's own polling) would flood the event log.
     for noisy in ("httpx", "httpx2", "httpcore", "aiohttp.access", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # The Telegram library's DEBUG lines include the Bot API address, i.e. the token.
+    for name in ("telegram", "telegram.ext"):
+        logging.getLogger(name).setLevel(logging.INFO)
     log.info(t("log.process_start"))  # where the event log draws the restart divider next time
 
 
@@ -114,6 +158,7 @@ class Runtime:
         """Settings that take effect without a restart (budget, admin chat, streaming services, …): reload
         and hand them to the running bot – changed in the web interface or in the chat."""
         self.cfg = config.load()
+        secret_filter.update(self.cfg)
         if self.corsarr is not None:
             self.corsarr.cfg = self.cfg
         if self.seerr is not None:
@@ -125,9 +170,10 @@ class Runtime:
             await self._stop()
             if self.db is not None:
                 self.db.conn.close()
-            keep = backup.restore(self.cfg.data_dir, settings, database)
+            keep = await asyncio.to_thread(backup.restore, self.cfg.data_dir, settings, database)
             log.info(t("log.backup_restored", keep=keep))
             self.cfg = config.load()
+            secret_filter.update(self.cfg)
             logging.getLogger().setLevel(self.cfg.log_level)
             self._open_db()
             await self._start()
@@ -137,6 +183,7 @@ class Runtime:
         async with self._lock:
             await self._stop()
             self.cfg = config.load()
+            secret_filter.update(self.cfg)
             logging.getLogger().setLevel(self.cfg.log_level)
             await self._start()
         await self.check()
