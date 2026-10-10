@@ -19,6 +19,7 @@ MIN_WATCH_TICKS = 5 * 60 * 10_000_000  # ignore accidental starts under 5 minute
 ABORT_UNANSWERED_WEIGHT = 0.3  # an ignored abort question is a light thumbs down
 ABORT_ANSWER_WINDOW = timedelta(days=2)
 QUESTION_EXPIRY = timedelta(days=7)
+OTHERS_WINDOW = timedelta(days=1)  # once someone rated: how long the others still have
 
 RATING_VALUE = {"up": 1, "meh": 0, "down": -1}
 
@@ -146,6 +147,8 @@ class FeedbackService:
                 await self.store_rating(req, "down", weight=ABORT_UNANSWERED_WEIGHT)
                 self.db.update_request(req["id"], status="expired")
                 log.info(t("log.abort_expired", title=req["title"]))
+            elif req["extra"].get("ratings") and age > OTHERS_WINDOW:
+                self.db.update_request(req["id"], status="answered")  # the others didn't rate – fine
             elif age > QUESTION_EXPIRY:
                 self.db.update_request(req["id"], status="expired")
 
@@ -173,12 +176,21 @@ class FeedbackService:
         return item.get("Genres") or [], [t.lower() for t in item.get("Tags") or []]
 
     async def store_rating(self, req: dict, rating: str, weight: float = 1.0,
-                           free_text: str | None = None) -> int:
+                           free_text: str | None = None, rater: tuple[int, str] | None = None) -> int:
+        """Store a rating. With a rater (Telegram user id, first name) each person has one rating per
+        question – rating again replaces their earlier one; the request's extra keeps who rated what."""
         genres, keywords = await self.title_tags(req)
+        ratings = dict(req["extra"].get("ratings") or {})
+        previous = ratings.get(str(rater[0])) if rater else None
+        if previous and previous.get("feedback_id"):
+            self.db.delete_feedback(previous["feedback_id"])
         fb_id = self.db.add_feedback(req["title_key"], req["title"], req["media_type"],
-                                     RATING_VALUE[rating], weight, free_text, genres, keywords)
-        extra = {**req["extra"], "feedback_id": fb_id}
+                                     RATING_VALUE[rating], weight, free_text, genres, keywords, rater)
+        if rater:
+            ratings[str(rater[0])] = {"name": rater[1], "rating": rating, "feedback_id": fb_id}
+        extra = {**req["extra"], "feedback_id": fb_id, "ratings": ratings}
         self.db.update_request(req["id"], extra=extra)
+        req["extra"] = extra
         self.profiles.invalidate()
         return fb_id
 

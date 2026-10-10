@@ -15,14 +15,13 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
-class Profile:
+class Taste:
+    """Signals from ratings and traits: shared ones, or those of one person."""
     genres: dict[str, float] = field(default_factory=dict)
     keywords: dict[str, float] = field(default_factory=dict)
     traits: list[dict] = field(default_factory=list)
-    liked: list[str] = field(default_factory=list)      # favourites and 👍 ratings
-    disliked: list[str] = field(default_factory=list)   # 👎 ratings
-    recent_movies: list[str] = field(default_factory=list)  # last watched, newest first
-    recent_series: list[str] = field(default_factory=list)
+    liked: list[str] = field(default_factory=list)
+    disliked: list[str] = field(default_factory=list)
 
     def score(self, c: Candidate) -> float:
         genres = [g.lower() for g in c.genres]
@@ -34,9 +33,42 @@ class Profile:
                 or tr["trait"].lower() in genres
             if hit:
                 s += (2.0 if tr["direction"] == "more" else -2.0) * tr["weight"]
+        return s
+
+
+@dataclass
+class Profile:
+    genres: dict[str, float] = field(default_factory=dict)
+    keywords: dict[str, float] = field(default_factory=dict)
+    traits: list[dict] = field(default_factory=list)
+    liked: list[str] = field(default_factory=list)      # favourites and 👍 ratings
+    disliked: list[str] = field(default_factory=list)   # 👎 ratings
+    recent_movies: list[str] = field(default_factory=list)  # last watched, newest first
+    recent_series: list[str] = field(default_factory=list)
+    people: dict[str, Taste] = field(default_factory=dict)  # first name -> their own ratings and traits
+
+    def score(self, c: Candidate) -> float:
+        """Shared taste (watch history, older ratings without a name) plus a fair compromise of the people:
+        the average of their scores, and what one of them clearly dislikes pulls the title down."""
+        s = Taste(self.genres, self.keywords, self.traits).score(c)
+        if self.people:
+            scores = [p.score(c) for p in self.people.values()]
+            s += sum(scores) / len(scores) + 0.5 * min(0.0, min(scores))
         if c.rating:
             s += (float(c.rating) - 6.5) / 10
         return s
+
+    def taste_for_prompt(self) -> dict:
+        """What the model sees about their taste; per person only when there are at least two."""
+        taste = {"liked": self.liked, "disliked": self.disliked,
+                 "recent_movies": self.recent_movies, "recent_series": self.recent_series}
+        if len(self.people) >= 2:
+            taste["per_person"] = {
+                name: {"liked": p.liked, "disliked": p.disliked,
+                       "more_of": [tr["trait"] for tr in p.traits if tr["direction"] == "more"],
+                       "less_of": [tr["trait"] for tr in p.traits if tr["direction"] == "less"]}
+                for name, p in self.people.items()}
+        return taste
 
 
 class ProfileBuilder:
@@ -76,13 +108,14 @@ def build_profile(history: list[dict], feedback: list[dict], traits: list[dict])
     for g, n in counts.items():
         genres[g] = n / top  # 0..1, history only pulls towards what they already watch
 
-    keywords: dict[str, float] = defaultdict(float)
-    for fb in feedback:
-        signal = fb["rating"] * fb["weight"]
-        for g in fb["genres"]:
-            genres[g.lower()] += 0.5 * signal
-        for k in fb["keywords"]:
-            keywords[k.lower()] += 0.3 * signal
+    # Ratings and traits without a name (from before per-person taste) count for everyone.
+    shared = _signals([fb for fb in feedback if not fb.get("rater_name")],
+                      [tr for tr in traits if not tr.get("rater_name")])
+    for g, v in shared.genres.items():
+        genres[g] += v
+    names = list(dict.fromkeys(r["rater_name"] for r in feedback + traits if r.get("rater_name")))
+    people = {name: _signals([fb for fb in feedback if fb.get("rater_name") == name],
+                             [tr for tr in traits if tr.get("rater_name") == name]) for name in names}
 
     def label(it: dict) -> str:
         year = it.get("ProductionYear")
@@ -95,10 +128,24 @@ def build_profile(history: list[dict], feedback: list[dict], traits: list[dict])
     watched = [it for it in history if not it.get("_favorite")]
     recent_movies = [label(it) for it in watched if it.get("Type") != "Series"]
     recent_series = [label(it) for it in watched if it.get("Type") == "Series"]
-    return Profile(genres=dict(genres), keywords=dict(keywords), traits=traits,
+    return Profile(genres=dict(genres), keywords=shared.keywords, traits=shared.traits,
                    liked=_unique(liked)[:HISTORY_TITLES], disliked=_unique(disliked)[:HISTORY_TITLES],
                    recent_movies=_unique(recent_movies)[:HISTORY_TITLES],
-                   recent_series=_unique(recent_series)[:HISTORY_TITLES])
+                   recent_series=_unique(recent_series)[:HISTORY_TITLES], people=people)
+
+
+def _signals(feedback: list[dict], traits: list[dict]) -> Taste:
+    genres: dict[str, float] = defaultdict(float)
+    keywords: dict[str, float] = defaultdict(float)
+    for fb in feedback:
+        signal = fb["rating"] * fb["weight"]
+        for g in fb["genres"]:
+            genres[g.lower()] += 0.5 * signal
+        for k in fb["keywords"]:
+            keywords[k.lower()] += 0.3 * signal
+    return Taste(genres=dict(genres), keywords=dict(keywords), traits=traits,
+                 liked=_unique([fb["title"] for fb in feedback if fb.get("title") and fb["rating"] > 0])[:HISTORY_TITLES],
+                 disliked=_unique([fb["title"] for fb in feedback if fb.get("title") and fb["rating"] < 0])[:HISTORY_TITLES])
 
 
 HISTORY_TITLES = 20  # per list – enough for "similar to …", small enough for the prompt

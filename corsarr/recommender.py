@@ -73,8 +73,7 @@ class Recommender:
         notes = t("sit.notes_new_only") if new_only else t("sit.notes_mix", max_lib=max_lib)
         n_max = min(PICKS_MAX, len(candidates))
         n_min = min(PICKS_MIN, n_max)
-        taste = {"liked": profile.liked, "disliked": profile.disliked,
-                 "recent_movies": profile.recent_movies, "recent_series": profile.recent_series}
+        taste = profile.taste_for_prompt()
         sel = await self.llm.select(request, candidates, speaker, n_min, n_max, notes, genres, taste)
 
         def fits(c: Candidate) -> bool:

@@ -45,6 +45,10 @@ def in_chat_language(method):
     return wrapper
 
 
+
+RATINGS_MARK = "🗳️"
+RATING_EMOJI = {"up": "👍", "meh": "😐", "down": "👎"}
+
 class CorsarrBot:
     def __init__(self, cfg: Config, db: DB, jellyfin: Jellyfin, seerr: Jellyseerr, llm: LLM,
                  recommender: Recommender, feedback: FeedbackService):
@@ -107,6 +111,7 @@ class CorsarrBot:
         msg = update.effective_message
         if not msg or msg.chat_id != self.cfg.chat_id or not msg.text:
             return
+        self._note_member(msg.from_user)
         addressed, text = self._addressed(msg)
         health.ok("telegram")
         if not addressed:
@@ -130,6 +135,29 @@ class CorsarrBot:
         with use_language(user.language_code or self.chat_language()):
             await msg.reply_text(t("bot.private_hello", name=html.escape(user.first_name or ""), id=msg.chat_id),
                                  parse_mode=ParseMode.HTML)
+
+    # --- the people in the group (for ratings per person) -------------------------
+    def _note_member(self, user) -> None:
+        """Remember who is in the group – everyone who writes to the bot or presses a button."""
+        if not user or getattr(user, "is_bot", False):
+            return
+        members = json.loads(self.db.get_state("members") or "{}")
+        name = user.first_name or user.full_name or str(user.id)
+        if members.get(str(user.id), {}).get("name") != name or not members.get(str(user.id)):
+            members[str(user.id)] = {"name": name, "seen": iso(now())}
+            self.db.set_state("members", json.dumps(members, ensure_ascii=False))
+
+    def members(self) -> dict[str, str]:
+        """id -> first name of the people known in the group."""
+        return {k: v["name"] for k, v in json.loads(self.db.get_state("members") or "{}").items()}
+
+    @staticmethod
+    def _rater(user) -> tuple[int, str] | None:
+        return (user.id, user.first_name or user.full_name or str(user.id)) if user else None
+
+    def _all_rated(self, req: dict) -> bool:
+        """A question stays open until everyone known in the group has rated (or it expires)."""
+        return len(req["extra"].get("ratings") or {}) >= max(1, len(self.members()))
 
     def chat_language(self) -> str:
         """Language the group last wrote in – used for messages the bot sends on its own."""
@@ -448,16 +476,18 @@ class CorsarrBot:
 
     async def _apply_feedback_text(self, msg: Message, req: dict, text: str, rating: str,
                                    core: str) -> None:
-        fb_id = req["extra"].get("feedback_id")
+        rater = self._rater(msg.from_user)
+        rated = req["extra"].get("ratings") or {}
+        fb_id = (rated.get(str(rater[0])) or {}).get("feedback_id") if rater else req["extra"].get("feedback_id")
         if fb_id is None and rating in ("up", "meh", "down"):
-            fb_id = await self.feedback.store_rating(req, rating, free_text=text)
-        if req["status"] in ("sent", "pending"):
+            fb_id = await self.feedback.store_rating(req, rating, free_text=text, rater=rater)
+        if req["status"] in ("sent", "pending") and (req["kind"] == "abort" or self._all_rated(req)):
             # Any answer counts – an answered abort question never turns into the light thumbs down.
             self.db.update_request(req["id"], status="answered")
         genres, keywords = await self.feedback.title_tags(req)
         res = await self.llm.feedback_traits(req["title"], rating, core, genres, keywords, self.speaker())
         for tr in res.traits:
-            self.db.add_trait(tr.direction, tr.trait, tr.tmdb_keywords, fb_id)
+            self.db.add_trait(tr.direction, tr.trait, tr.tmdb_keywords, fb_id, rater=rater)
             log.info(t("log.trait_saved", direction=tr.direction, trait=tr.trait, keywords=tr.tmdb_keywords))
         self.feedback.profiles.invalidate()
         await msg.reply_text(res.reply)
@@ -468,6 +498,7 @@ class CorsarrBot:
         q = update.callback_query
         if not q or not q.message or q.message.chat_id != self.cfg.chat_id or not q.data:
             return
+        self._note_member(q.from_user)
         parts = q.data.split(":")
         try:
             if parts[0] == "req":
@@ -486,6 +517,20 @@ class CorsarrBot:
                 await q.answer()
         except LLMUnavailable as e:
             await self.enter_outage(str(e))
+
+    async def _show_ratings(self, q, req: dict, keep_buttons: bool) -> None:
+        """One line "🗳️ 👍 Sam · 👎 Alex" under the question, updated with every rating; the buttons stay
+        until everyone has rated."""
+        m = q.message
+        ratings = req["extra"].get("ratings") or {}
+        line = RATINGS_MARK + " " + " · ".join(f"{RATING_EMOJI[r['rating']]} {html.escape(r['name'])}"
+                                                for r in ratings.values())
+        text = "\n".join(ln for ln in m.text_html.split("\n") if not ln.startswith(RATINGS_MARK)).rstrip()
+        markup = m.reply_markup if keep_buttons else None
+        try:
+            await m.edit_text(f"{text}\n\n{line}", parse_mode=ParseMode.HTML, reply_markup=markup)
+        except TelegramError as e:
+            log.warning(t("log.not_editable", error=e))
 
     async def _mark(self, q, note: str, keep: list[list[InlineKeyboardButton]] | None = None) -> None:
         """Append a status line to the message and replace its buttons (link buttons like the trailer stay)."""
@@ -565,12 +610,15 @@ class CorsarrBot:
         if not req or req["status"] not in ("sent", "pending"):
             await q.answer(t("bot.already_answered"))
             return
-        await self.feedback.store_rating(req, rating)
-        self.db.update_request(rid, status="answered")
+        rater = self._rater(q.from_user)
+        await self.feedback.store_rating(req, rating, rater=rater)
+        done = self._all_rated(req)
+        if done:
+            self.db.update_request(rid, status="answered")
         label = t(f"bot.btn_{rating}")
-        log.info(t("log.rated", title=req["title"], rating=label))
+        log.info(t("log.rated", title=req["title"], rating=f"{label} ({rater[1] if rater else '?'})"))
         await q.answer(t("bot.saved", label=label))
-        await self._mark(q, t("bot.rated_note", label=label))
+        await self._show_ratings(q, req, keep_buttons=not done)
 
     async def _cb_abort(self, q, rid: int, choice: str) -> None:
         req = self.db.request(rid)
@@ -578,7 +626,7 @@ class CorsarrBot:
             await q.answer(t("bot.already_answered"))
             return
         if choice == "bad":
-            await self.feedback.store_rating(req, "down")
+            await self.feedback.store_rating(req, "down", rater=self._rater(q.from_user))
             self.db.update_request(rid, status="answered")
             note = t("bot.abort_bad_note")
         elif choice == "tired":
