@@ -113,6 +113,8 @@ DE: dict[str, str] = {
     "sit.lookup_none": "Sie haben nach einem bestimmten Titel gefragt, aber die Suche bei Jellyseerr hat nichts Passendes gefunden (gesucht wurde nach den Begriffen in den Fakten). Sag das kurz und bitte darum, den Titel anders zu beschreiben oder den Originaltitel zu nennen.",
     "bot.pending": "⏳ Bereits angefragt – wird geladen · {kind}",
     "log.lookup": "Titelsuche nach {queries}: {n} Treffer",
+    "log.collection": "Filmreihe {name}: {n} Teile, {missing} fehlen",
+    "log.no_collection": "{title} gehört zu keiner Filmreihe – zeige den Titel allein",
     "log.search_failed": "Suche nach „{query}“ fehlgeschlagen: {error}",
     "bot.in_library": "✅ In eurer Bibliothek · {kind}",
     "bot.not_available": "🆕 Nicht vorhanden – auf Wunsch anfragen · {kind}",
@@ -123,6 +125,16 @@ DE: dict[str, str] = {
     "bot.season_many": "📺 {n} Staffeln",
     "bot.download_hint": "⏳ Wird erst nach der Anfrage geladen – das kann ein paar Stunden dauern",
     "bot.btn_request": "📥 Anfragen",
+    "bot.coll_library": "✅ {title}",
+    "bot.coll_pending": "⏳ {title} · angefragt, wird geladen",
+    "bot.coll_missing": "🆕 {title}",
+    "bot.coll_blocked": "🚫 {title} · gesperrt",
+    "bot.coll_requested_by": "📥 {title} · angefragt von {who}",
+    "bot.coll_more": "… und {n} weitere",
+    "bot.btn_request_missing": "📥 Fehlende anfragen ({n})",
+    "bot.coll_requested": "{n} angefragt ✅",
+    "bot.coll_nothing_missing": "Es fehlt nichts mehr ✅",
+    "bot.coll_failed": "{n} Anfragen bei Jellyseerr fehlgeschlagen ❌",
     "bot.btn_reject": "🙅 Nicht interessiert",
     "bot.btn_accept": "✅ Schauen wir",
     "bot.btn_trailer": "🎬 Trailer",
@@ -185,6 +197,14 @@ DE: dict[str, str] = {
                             "direkt auf die Feedback-Frage zu antworten oder den Titel zu nennen.",
     "sit.requested": "Ein neuer Titel wurde gerade über Jellyseerr angefragt und lädt jetzt herunter. "
                      "Bestätige das in der Gruppe; erwähne, dass das Laden ein paar Stunden dauern kann.",
+    "sit.collection": "Sie wollen alle Teile einer Filmreihe. Die Fakten sagen, welche Teile schon in der "
+                      "Bibliothek sind, welche angefragt sind und welche fehlen. Stell die Reihe in 1–2 kurzen "
+                      "Zeilen vor; fehlen Teile, sag, dass der Button darunter alle fehlenden auf einmal anfragt "
+                      "(Laden dauert ein paar Stunden); fehlt nichts, sag, dass sie schon alles haben. Zähl die "
+                      "Titel nicht einzeln auf – die Liste steht darunter.",
+    "sit.collection_requested": "Die fehlenden Teile einer Filmreihe wurden gerade über Jellyseerr angefragt "
+                                "und laden jetzt herunter. Bestätige das kurz in der Gruppe; erwähne, dass das "
+                                "Laden ein paar Stunden dauern kann.",
     "sit.notes_mix": "Kandidaten mit source 'Bibliothek' sind sofort verfügbar, die anderen sind neu und müssen "
                      "erst angefragt werden. Nimm höchstens {max_lib} aus der Bibliothek (die passendsten), den "
                      "Rest aus den neuen Titeln. Erwähne in der Einleitung kurz, dass die neuen erst angefragt "
@@ -266,7 +286,9 @@ für die TMDB-Suche – zuerst dein bester Tipp für den genauen Titel, auch wen
 neuer sein könnte als dein Wissen; dann kurze Stichwörter aus der Nachricht (z. B. "Vision", "Marvel Vision"). \
 Beschreiben sie nur die Handlung ("der Film, wo der Kerl am Ende merkt, dass er tot ist – wie heißt der?"), \
 dann die Titel, die du anhand der Beschreibung für möglich hältst, wahrscheinlichster zuerst. \
-Originaltitel sind meist englisch. Bei allen anderen Absichten search_queries leer lassen.
+Originaltitel sind meist englisch. Wollen sie alle Teile einer Filmreihe ("hol uns alle Teile von Mission: \
+Impossible", "die ganze Herr-der-Ringe-Reihe"), whole_collection = true und search_queries wie oben (Titel eines \
+Teils oder der Reihe); sonst whole_collection = false. Bei allen anderen Absichten search_queries leer lassen.
 - settings: sie ändern eine Einstellung (Serien-Pause in Tagen, Abbruch-Nachfrage in Tagen, Figuren an/aus). \
 Wochen in Tage umrechnen. Nur geänderte Felder setzen, sonst null. Figuren: characters_on/characters_off mit den \
 IDs pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("alle" = alle IDs, "nur die Oma" = grandma an, alle anderen aus).
@@ -790,6 +812,8 @@ EN: dict[str, str] = {
     "sit.lookup_none": "They asked about a specific title, but the Jellyseerr search found nothing that fits (the search terms are in the facts). Say so briefly and ask them to describe the title differently or give the original title.",
     "bot.pending": "⏳ Already requested – downloading · {kind}",
     "log.lookup": "Title search for {queries}: {n} hits",
+    "log.collection": "Film series {name}: {n} parts, {missing} missing",
+    "log.no_collection": "{title} belongs to no film series – showing the title alone",
     "log.search_failed": "Search for “{query}” failed: {error}",
     "bot.in_library": "✅ In your library · {kind}",
     "bot.not_available": "🆕 Not in your library – can be requested · {kind}",
@@ -800,6 +824,16 @@ EN: dict[str, str] = {
     "bot.season_many": "📺 {n} seasons",
     "bot.download_hint": "⏳ Downloads after requesting – this can take a few hours",
     "bot.btn_request": "📥 Request",
+    "bot.coll_library": "✅ {title}",
+    "bot.coll_pending": "⏳ {title} · requested, downloading",
+    "bot.coll_missing": "🆕 {title}",
+    "bot.coll_blocked": "🚫 {title} · blocked",
+    "bot.coll_requested_by": "📥 {title} · requested by {who}",
+    "bot.coll_more": "… and {n} more",
+    "bot.btn_request_missing": "📥 Request missing ({n})",
+    "bot.coll_requested": "{n} requested ✅",
+    "bot.coll_nothing_missing": "Nothing missing any more ✅",
+    "bot.coll_failed": "{n} requests to Jellyseerr failed ❌",
     "bot.btn_reject": "🙅 Not interested",
     "bot.btn_accept": "✅ Let's watch",
     "bot.btn_trailer": "🎬 Trailer",
@@ -860,6 +894,14 @@ EN: dict[str, str] = {
                             "directly to the feedback question or to name the title.",
     "sit.requested": "A new title was just requested via Jellyseerr and is downloading now. Confirm this "
                      "in the group; mention that loading can take a few hours.",
+    "sit.collection": "They want all parts of a film series. The facts say which parts are already in the "
+                      "library, which are requested and which are missing. Introduce the series in 1–2 short "
+                      "lines; if parts are missing, say that the button below requests all missing ones at once "
+                      "(downloading takes a few hours); if nothing is missing, say they already have it all. "
+                      "Don't list the titles one by one – the list is right below.",
+    "sit.collection_requested": "The missing parts of a film series were just requested via Jellyseerr and "
+                                "are downloading now. Confirm this briefly in the group; mention that loading "
+                                "can take a few hours.",
     "sit.notes_mix": "Candidates with source 'library' are available right away, the others are new and have to "
                      "be requested first. Take at most {max_lib} from the library (the best fitting ones), the "
                      "rest from the new titles. Mention briefly in the intro that the new ones have to be "
@@ -940,8 +982,10 @@ intent:
 guess of the exact title, even if unsure or if the title may be newer than your knowledge; then short keywords \
 from the message (e.g. "Vision", "Marvel Vision"). If they only describe the plot ("the film where the guy \
 realises at the end that he was dead all along – what's it called?"), give the titles you think match the \
-description, most likely first. Original titles are usually English. For all other intents leave \
-search_queries empty.
+description, most likely first. Original titles are usually English. If they want all parts of a film \
+series ("get us all the Lord of the Rings films", "the whole Mission: Impossible series"), whole_collection = \
+true and search_queries as above (title of one part or of the series); otherwise whole_collection = false. For \
+all other intents leave search_queries empty.
 - settings: they change a setting (series pause in days, abort follow-up in days, characters on/off). \
 Convert weeks to days. Only set changed fields, otherwise null. Characters: characters_on/characters_off with \
 the ids pirate, genz, butler, critic, clerk, noir, trailer, computer, grandma, reporter, cat, bard ("all" = all ids, "only grandma" = grandma on, all others off).

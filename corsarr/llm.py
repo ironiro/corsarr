@@ -118,6 +118,8 @@ class Understanding(BaseModel):
     search_queries: list[str] = Field(default_factory=list, description=(
         "lookup only: 1–4 TMDB search terms – your best guess of the exact title first, then short keyword "
         "combinations from the message"))
+    whole_collection: bool = Field(False, description=(
+        "lookup only: they want all parts of a film series (e.g. all Mission: Impossible films)"))
     media_types: list[Literal["movie", "tv"]] = Field(description="empty = movies and series")
     jellyfin_genres: list[str] = Field(description="only names from the Jellyfin genre list")
     tmdb_movie_genre_ids: list[int]

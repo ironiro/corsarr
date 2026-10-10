@@ -17,6 +17,8 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
   Buttons: ✅ Let's watch · 📥 Request (via Jellyseerr) · 🙅 Not interested.
 - **Looking up a title:** `@bot there's a new Marvel series with Vision now` or `@bot what's the film where the
   guy was dead all along?` → the matching title as a card, ready to watch or request.
+- **Whole film series:** `@bot get us all the Lord of the Rings films` → one message with every part (✅ in the
+  library, ⏳ requested, 🆕 missing) and one button that requests all missing parts at once.
 - **Based on your history:** `@bot what fits what we watched lately?`
 - **Feedback per person:** both rate after the film, and suggestions respect both tastes.
 - **Feedback:** movie finished, season done, series paused, movie abandoned – the bot asks and remembers

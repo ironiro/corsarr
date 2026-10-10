@@ -56,6 +56,20 @@ original title.
 Recognising a film from a plot description depends on the model's knowledge – Claude does this well, small local
 models often don't.
 
+### All parts of a film series
+
+Ask for the whole series and Corsarr fetches its TMDB collection instead of a single card:
+
+- `@bot get us all the Lord of the Rings films`
+- `@bot hol uns alle Teile von Mission: Impossible`
+
+The lookup runs as above; for the movie that is meant, Corsarr reads its collection from Jellyseerr/Seerr and
+posts **one message** (with the collection's poster) listing every part in release order: ✅ in your library,
+⏳ requested/downloading, 🆕 missing (🚫 blocklisted in Seerr). The button 📥 **Request missing (3)** requests
+every missing part at once – one Seerr request per movie, as Seerr's own collection dialog does – and the message
+then shows who requested what. A part whose request fails stays 🆕 and the button stays for a retry. If nothing
+is missing there is no button; if the movie belongs to no collection you get the normal card.
+
 ## Feedback after watching
 
 Requires the [Jellyfin webhook](Webhooks.md#jellyfin--feedback-after-watching).
