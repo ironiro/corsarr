@@ -377,3 +377,25 @@ def test_backup_needs_an_admin_password(env):
         r = await client.post("/api/backup", headers=H, json={"password": "backup-secret"})
         assert r.status == 403
     with_client(test)
+
+
+def test_bundled_fonts_are_served_cached_and_small(env):
+    import pathlib
+    import re as _re
+    root = pathlib.Path(web.STATIC)
+    css = (root / "style.css").read_text(encoding="utf-8")
+    urls = _re.findall(r'url\("(fonts/[^"]+)"\)', css)
+    assert len(urls) == 4 and all((root / u).is_file() for u in urls)
+    assert all((root / "fonts" / name / "OFL.txt").is_file() for name in ("vt323", "nunito"))
+    assert sum(p.stat().st_size for p in (root / "fonts").rglob("*")) < 400_000
+    assert "http" not in "".join(urls)  # nothing from outside at runtime
+
+    async def test(client, rt):
+        r = await client.get("/static/" + urls[0])
+        assert r.status == 200 and "max-age" in r.headers["Cache-Control"]
+        assert r.headers["Content-Type"] == "font/woff2"
+        assert "Cache-Control" not in (await client.get("/static/app.js")).headers
+        await login(client)
+        data = await (await client.get("/api/events")).json()
+        assert data["boot"]  # the GUI notices a restart by this value
+    with_client(test)
