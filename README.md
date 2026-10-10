@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="#-quick-start">Quick start</a> ·
-  <a href="docs/Home.md">Documentation</a> ·
+  <a href="https://github.com/ironiro/corsarr/wiki">Documentation</a> ·
   <a href="#-screenshots">Screenshots</a> ·
   <a href="https://github.com/ironiro/corsarr/issues/new/choose">Report a bug</a> ·
   <a href="https://github.com/ironiro/corsarr/issues/new?template=feature_request.yml">Request a feature</a>
@@ -124,6 +124,8 @@ OpenAI, Google Gemini, Ollama and LM Studio can be selected too, but are **untes
 > provider. Use at your own risk.
 
 ## 📚 Documentation
+
+The full documentation is in the **[wiki](https://github.com/ironiro/corsarr/wiki)** (also in [`docs/`](docs/)):
 
 | | |
 | --- | --- |

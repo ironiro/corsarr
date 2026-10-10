@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.3
+
+- The documentation is now also a [GitHub wiki](https://github.com/ironiro/corsarr/wiki); the "Documentation" link
+  in the web interface's footer and in the README lead there.
+
 ## v1.0.2
 
 - Budget messages show small amounts precisely (0,016 $ instead of 0,02 $) and the share in per cent; the
