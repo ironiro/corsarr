@@ -1,0 +1,16 @@
+name: 💡 Feature request
+description: An idea for Corsarr.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like Corsarr to do?
+      description: Describe the situation at movie night (or in the admin interface) and what would help.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: E.g. what you would write to the bot and what it should answer.

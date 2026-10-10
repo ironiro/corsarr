@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/ironiro/corsarr/blob/main/docs/Home.md
+    about: Installation, setup, configuration and troubleshooting.
+  - name: 🔒 Security problem
+    url: https://github.com/ironiro/corsarr/security/advisories/new
+    about: Please report security problems privately, not as a public issue.

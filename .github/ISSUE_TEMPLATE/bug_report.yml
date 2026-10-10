@@ -1,0 +1,44 @@
+name: 🐛 Bug report
+description: Something doesn't work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **remove API keys, tokens, IP addresses and names** from anything you paste.
+        The [Troubleshooting](https://github.com/ironiro/corsarr/blob/main/docs/Troubleshooting.md) page may already have the answer.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the footer of the web interface and under Status → Version.
+      placeholder: v1.0.1
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options: [Proxmox LXC (proxmox.sh), Existing container (install.sh), Docker, Manual / other]
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider
+      options: [Claude, OpenAI, Google Gemini, Ollama, LM Studio]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do (e.g. the message you sent to the bot), what happened, what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: events
+    attributes:
+      label: Events / logs
+      description: Web interface → Events (filter "Warnings and higher"), or `journalctl -u corsarr -n 100` / `docker compose logs`.
+      render: text
