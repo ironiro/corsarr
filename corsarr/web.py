@@ -419,7 +419,7 @@ async def api_events(request: web.Request) -> web.Response:
         after = int(request.query.get("after", "0"))
     except ValueError:
         after = 0
-    return web.json_response({"events": events.since(after), "now": time.time()})
+    return web.json_response({"events": events.since(after), "boot": events.boot, "now": time.time()})
 
 
 # --- GUI: configuration ---------------------------------------------------------
@@ -538,12 +538,21 @@ async def api_settings_save(request: web.Request) -> web.Response:
 
 # --- app ---------------------------------------------------------------------------
 
+async def _font_headers(request: web.Request, response: web.StreamResponse) -> None:
+    # Fonts don't change between versions (app.js/style.css get the version in their URL instead).
+    if request.path.startswith("/static/fonts/") and response.status == 200:
+        response.headers["Cache-Control"] = "public, max-age=2592000"
+        if request.path.endswith(".woff2"):  # unknown to some systems' MIME tables
+            response.headers["Content-Type"] = "font/woff2"
+
+
 def build_app(runtime: "Runtime") -> web.Application:
     # Uploads: backups for restoring can be larger than aiohttp's default of 1 MB.
     app = web.Application(middlewares=[auth_middleware], client_max_size=backup.MAX_SIZE + 1024 * 1024)
     app[RUNTIME] = runtime
     app[SESSIONS] = {}
     app[TASKS] = set()
+    app.on_response_prepare.append(_font_headers)
     app.router.add_post("/jellyfin", jellyfin_webhook)
     app.router.add_post("/sonarr", sonarr_webhook)
     app.router.add_post("/radarr", radarr_webhook)

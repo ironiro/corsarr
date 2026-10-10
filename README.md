@@ -90,3 +90,5 @@ The tests need no credentials and no running services. Details: [Development](do
 
 [GPL-3.0](LICENSE) – free to use, study, modify and share. If you distribute a modified version, its
 source code must be available under the same licence.
+
+The web interface bundles the fonts VT323 and Nunito under the [SIL Open Font License 1.1](corsarr/web/fonts/) (licence texts next to the font files).
