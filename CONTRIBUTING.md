@@ -30,6 +30,8 @@ to add a language.
   [docs/Development.md](docs/Development.md) – older installations must keep working.
 - Add a line to [CHANGELOG.md](CHANGELOG.md) under **Unreleased**.
 - Never commit real API keys, tokens, IP addresses or personal data – also not in screenshots.
+- Corsarr is licensed under [GPL-3.0](LICENSE); by opening a pull request you agree that your contribution is
+  published under it.
 
 ## Releases
 
