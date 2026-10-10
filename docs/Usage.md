@@ -92,8 +92,14 @@ The same settings are in the web interface under *Configuration → Bot behaviou
 - 🏴‍☠️ **Pirate** and 📱 **Gen Z** take turns at random or have a short exchange. If only one is active, only
   that one speaks; with both off the bot writes plainly.
 - The characters avoid repeating themselves: the bot remembers its latest phrasings.
-- **Language:** the bot speaks English and German and answers in the language you write in – text, suggestion
-  card, buttons, reasons and TMDB plot summaries. Messages in any other language get an English answer. Messages it sends on its own (feedback questions, download notifications) use the language last used in the group. A suggestion card keeps its language while browsing.
+- **Language:** the bot answers in whatever language you write in – French, Spanish, Turkish, … – text,
+  suggestion card, buttons, reasons and TMDB plot summaries (where TMDB has them in that language).
+  German and English texts are built in. For any other language the model writes its replies in it directly,
+  and the fixed texts (buttons, card lines, download messages) are translated **once** by the model and stored –
+  about a third of a cent with Claude Haiku. A translation that loses a placeholder or formatting is discarded
+  and that text stays English. Messages the bot sends on its own (feedback questions, download notifications)
+  use the language last used in the group. A suggestion card keeps its language while browsing. The web
+  interface is available in English and German.
 
 ## When the AI provider is unreachable
 

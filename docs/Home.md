@@ -17,8 +17,8 @@ episode.
   message.
 - **Web interface** with a setup assistant, connection status, event log, the complete configuration and
   encrypted backup and restore.
-- **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Speaks English and German and answers in the
-  language you write in.
+- **Two characters:** 🏴‍☠️ pirate and 📱 Gen Z (each can be switched off). Answers in whatever language you write in
+  (web interface in English and German).
 
 ## Pages
 

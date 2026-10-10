@@ -17,7 +17,7 @@ from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
 from . import arr, persona
-from .i18n import default_language, language, supported, switch_language, t, use_language
+from .i18n import default_language, language, normalize, switch_language, t, use_language
 from .monitor import health
 from .config import Config
 from .db import DB, now
@@ -25,6 +25,7 @@ from .feedback import FeedbackService
 from .jellyfin import Jellyfin
 from .jellyseerr import Jellyseerr
 from .llm import LLM, LLMFailed, LLMUnavailable, Understanding
+from .translate import Translations
 from .models import Candidate
 from .poster import placeholder_png
 from .recommender import Recommender
@@ -49,6 +50,7 @@ class CorsarrBot:
                  recommender: Recommender, feedback: FeedbackService):
         self.cfg, self.db, self.jellyfin, self.seerr = cfg, db, jellyfin, seerr
         self.llm, self.recommender, self.feedback = llm, recommender, feedback
+        self.translations = Translations(db, llm)  # fixed texts for languages without built-in ones
         self.app: Application | None = None
         self.bot_id: int | None = None
         self.username = ""
@@ -117,9 +119,14 @@ class CorsarrBot:
         """Language the group last wrote in – used for messages the bot sends on its own."""
         return self.db.get_state("chat_language") or default_language()
 
-    def _adopt_language(self, und: Understanding) -> None:
-        switch_language(und.language)
-        self.db.set_state("chat_language", supported(und.language))
+    async def _adopt_language(self, und: Understanding) -> None:
+        """Answer in the language of the message – any language; fixed texts are translated once if needed."""
+        lang = normalize(und.language)
+        if not lang:
+            return
+        switch_language(lang)
+        self.db.set_state("chat_language", lang)
+        await self.translations.ensure(lang)
 
     async def _handle(self, msg: Message, text: str, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self.down and not await self._probe():
@@ -136,7 +143,7 @@ class CorsarrBot:
                 await self._feedback_text(msg, fb_req, text)
                 return
             und = await self.llm.understand(text or t("bot.hello"), self.db.recent_requests())
-            self._adopt_language(und)
+            await self._adopt_language(und)
             who = msg.from_user.first_name if msg.from_user else "?"
             short = text if len(text) <= 120 else text[:119] + "…"
             log.info(t("log.intent", who=who, text=short, intent=und.intent, types=und.media_types or "*",
@@ -402,7 +409,7 @@ class CorsarrBot:
     async def _feedback_text(self, msg: Message, req: dict, text: str) -> None:
         """Free text as a reply to a feedback question."""
         und = await self.llm.understand(t("bot.feedback_reply_prefix", title=req["title"], text=text), [req])
-        self._adopt_language(und)
+        await self._adopt_language(und)
         await self._apply_feedback_text(msg, req, text, und.feedback.rating, und.feedback.text or text)
 
     async def _feedback_intent(self, msg: Message, text: str, und: Understanding) -> None:

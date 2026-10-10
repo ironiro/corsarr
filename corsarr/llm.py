@@ -13,10 +13,10 @@ from typing import Literal, Optional
 
 import anthropic
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from . import persona
-from .i18n import t
+from .i18n import language, t
 from .config import DEFAULT_URLS, LOCAL_PROVIDERS, PROVIDER_NAMES
 from .monitor import describe_error, health
 from .models import Candidate
@@ -122,6 +122,23 @@ class Trait(BaseModel):
     direction: Literal["more", "less"]
     trait: str = Field(description="short trait in the chat language, e.g. 'gore'")
     tmdb_keywords: list[str] = Field(description="matching English TMDB keywords, lowercase")
+
+
+class TranslatedText(BaseModel):
+    key: str
+    text: str
+
+
+class Translated(BaseModel):
+    items: list[TranslatedText]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _plain_mapping(cls, data):
+        # Smaller models often answer {"bot.x": "…"} instead of the requested list – accept that too.
+        if isinstance(data, dict) and "items" not in data and all(isinstance(v, str) for v in data.values()):
+            return {"items": [{"key": k, "text": v} for k, v in data.items()]}
+        return data
 
 
 class TraitResult(BaseModel):
@@ -406,7 +423,9 @@ class LLM:
         )
 
     def _system(self) -> str:
-        return f"{t('prompt.base', characters=persona.characters())}\n\n{self.genre_context}"
+        # The language line is last: with prompts in English it is what makes the model answer in French etc.
+        return (f"{t('prompt.base', characters=persona.characters())}\n\n{self.genre_context}\n\n"
+                f"{t('prompt.output_language', lang=language())}")
 
     async def _call(self, user: str, output_format: type[BaseModel] | None, max_tokens: int = 2000):
         try:
@@ -476,6 +495,12 @@ class LLM:
             p.reason = persona.enforce(p.reason.splitlines()[0] if p.reason else "", speaker)
         self._remember(sel.intro, *(p.reason for p in sel.picks))
         return sel
+
+    async def translate(self, lang: str, texts: dict[str, str]) -> dict[str, str]:
+        """Fixed Telegram texts from English into `lang` (see translate.py)."""
+        prompt = t("prompt.translate", lang=lang, texts=json.dumps(texts, ensure_ascii=False))
+        res: Translated = await self._call(prompt, Translated, max_tokens=8000)
+        return {item.key: item.text for item in res.items}
 
     async def feedback_traits(self, title: str, rating: str, text: str, genres: list[str],
                               keywords: list[str], speaker: str) -> TraitResult:

@@ -18,5 +18,7 @@ def german_texts():
     """Most tests check the German texts; English is the product default (see test_gui)."""
     from corsarr import i18n
     i18n.set_language("de")
+    i18n._translated.clear()  # translations of other languages live in memory – none leak between tests
     yield
     i18n.set_language("de")
+    i18n._translated.clear()
