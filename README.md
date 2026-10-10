@@ -15,6 +15,8 @@ configuration. OpenAI, Gemini, Ollama and LM Studio can be selected too, but are
 - **Suggestions:** `@bot find us a thriller for tonight` → 5–6 titles as **one browsable card** (◀️ ▶️):
   the first 1–2 from your library, the rest new. Each comes with a poster, a reason why it fits and a 🎬 trailer link.
   Buttons: ✅ Let's watch · 📥 Request (via Jellyseerr) · 🙅 Not interested.
+- **Where can we stream it?** Pick the streaming services you subscribe to, and cards for new titles show
+  whether one of them includes the title ("📺 On Netflix") – watch it there or request it anyway.
 - **Looking up a title:** `@bot there's a new Marvel series with Vision now` or `@bot what's the film where the
   guy was dead all along?` → the matching title as a card, ready to watch or request.
 - **Based on your history:** `@bot what fits what we watched lately?`

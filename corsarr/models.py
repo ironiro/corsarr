@@ -28,6 +28,7 @@ class Candidate:
     trailer_url: str | None = None  # YouTube link from Jellyfin or TMDB
     score: float = 0.0
     votes: int | None = None  # TMDB vote count – how well known a title is (helps tell search hits apart)
+    streaming: list[str] = field(default_factory=list)  # subscribed streaming services that have it (new titles)
 
     @property
     def key(self) -> str:

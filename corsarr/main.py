@@ -141,6 +141,7 @@ class Runtime:
         log.info(t("log.bot_starting"))
         self.jellyfin = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user)
         self.seerr = Jellyseerr(cfg.jellyseerr_url, cfg.jellyseerr_api_key)
+        self.seerr.set_streaming(cfg.streaming_region, cfg.streaming_ids)
         self.llm = llm_module.create(cfg)
         profiles = ProfileBuilder(self.db, self.jellyfin)
         recommender = Recommender(self.db, self.jellyfin, self.seerr, self.llm, profiles)
