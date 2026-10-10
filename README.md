@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="https://ironiro.github.io/corsarr/">Website</a> ·
   <a href="#-quick-start">Quick start</a> ·
   <a href="https://github.com/ironiro/corsarr/wiki">Documentation</a> ·
   <a href="#-screenshots">Screenshots</a> ·
