@@ -137,7 +137,7 @@ def test_jellyfin_hook_ok():
     conf = {"GenericOptions": [dest(uri="http://elsewhere/x"), dest()]}
     version = run(lambda c: setup.check_jellyfin_hook("http://jf:8096", "k", "s", client=c),
                   jellyfin_server(WEBHOOK_PLUGIN, conf))
-    assert version == "18.0.0.0"
+    assert version == ("18.0.0.0", "http://corsarr:8787/jellyfin")
 
 
 def arr_status_server(hooks, tested, test_status=200):
@@ -161,7 +161,8 @@ OUR_HOOK = {"id": 4, "name": "Corsarr", "implementation": "Webhook", "enable": T
 def test_arr_check_finds_the_webhook_and_sends_a_test_only_when_asked():
     tested = []
     check = lambda send: (lambda c: setup.check_arr("radarr", "http://radarr:7878", "arrkey", "s", send_test=send, client=c))
-    assert run(check(False), arr_status_server([OUR_HOOK], tested)) == "5.2.0" and tested == []
+    assert run(check(False), arr_status_server([OUR_HOOK], tested)) == ("5.2.0", "http://corsarr:8787/radarr?secret=s")
+    assert tested == []
     run(check(True), arr_status_server([OUR_HOOK], tested))
     assert tested == ["Corsarr"]
 
@@ -194,8 +195,12 @@ def test_status_tiles_check_actively_only_with_saved_access(tmp_path, monkeypatc
         calls.append((kind, send_test))
         if kind == "sonarr":
             raise setup.SetupError("check.arr_hook_missing")
-        return "5.2.0"
+        return "5.2.0", "http://corsarr:8787/radarr?secret=s"
     monkeypatch.setattr(setup, "check_arr", fake_check)
+
+    async def here(url, own_id):
+        return None
+    monkeypatch.setattr(setup, "points_here", here)
     health.reset()
     try:
         cfg = config.load()
@@ -217,3 +222,22 @@ def test_status_tiles_check_actively_only_with_saved_access(tmp_path, monkeypatc
     finally:
         health.reset()
         i18n.set_language("de")
+
+
+def test_webhook_address_must_lead_to_this_corsarr(tmp_path):
+    own = setup.instance_id(tmp_path)
+    assert setup.instance_id(tmp_path) == own  # stable across restarts
+
+    def server(instance):
+        def handler(request):
+            assert request.url.path == "/health" and request.url.params["instance"] == "1"
+            if instance is None:
+                raise httpx.ConnectTimeout("no answer")
+            return httpx.Response(200, json={"ok": True, "instance": instance})
+        return handler
+    check = lambda url: (lambda c: setup.points_here(url, own, client=c))
+    assert run(check("http://192.0.2.10:8787/jellyfin"), server(own)) is None
+    assert run(check("https://corsarr.example/radarr?secret=s"), server(own)) is None  # behind a proxy
+    assert "führt nicht zu diesem Corsarr" in run(check("http://192.0.2.99:8787/sonarr?secret=s"), server("another-corsarr"))
+    assert "nicht erreichbar" in run(check("http://192.0.2.45:8787/jellyfin"), server(None))  # the old machine
+    assert "ungültig" in run(check("corsarr/jellyfin"), server(own))

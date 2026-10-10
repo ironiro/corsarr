@@ -2,6 +2,8 @@
 
 ## Unreleased (beta)
 
+- The status checks for the Jellyfin webhook plugin and Sonarr/Radarr also verify that the address entered
+  there leads to this Corsarr (an old address after a move went unnoticed so far).
 - A logo for Corsarr (also the web interface's favicon), a reworked README, issue and pull request templates,
   CONTRIBUTING.md and SECURITY.md.
 - Collapsible blocks on the status page ("What for (this month)", "Output of the last update") stay open

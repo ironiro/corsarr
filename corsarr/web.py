@@ -139,7 +139,9 @@ async def _arr_webhook(request: web.Request, service: str, record) -> web.Respon
     return web.Response(text="ok")
 
 
-async def health_endpoint(_: web.Request) -> web.Response:
+async def health_endpoint(request: web.Request) -> web.Response:
+    if request.query.get("instance"):  # lets the status check tell whether a webhook address leads here
+        return web.json_response({"ok": True, "instance": setup.instance_id(_rt(request).cfg.data_dir)})
     return web.Response(text="ok")
 
 
