@@ -34,12 +34,14 @@ Browser ────────────▶ web.py ──▶ config.py / mon
 | --- | --- |
 | `main.py` | Startup; `Runtime` holds configuration, database and the restartable Telegram part. The web server always runs. |
 | `bot.py` | Telegram: mentions, browsable suggestion card, buttons, feedback questions, outage mode, jobs |
-| `recommender.py` | Collect candidates (max. 2 from the library + new ones), sort by genre matches and profile, let Claude pick |
-| `profile.py` | Taste profile: genre weights from history/favourites, feedback, traits; title lists for Claude |
+| `recommender.py` | Collect candidates (max. 2 from the library + new ones), sort by genre matches and profile, let the model pick; title lookup and film series |
+| `profile.py` | Taste profile: genre weights from history/favourites, feedback, traits – shared and per person; title lists for the model |
 | `feedback.py` | Webhook processing (movie end, season end, pause, abort), deadlines, storing ratings |
-| `arr.py` | Store Sonarr/Radarr imports and bundle them into messages |
+| `arr.py` | Store Sonarr/Radarr imports, catch up missed ones from their history, bundle them into messages |
 | `llm.py` | Language model calls with structured output, repetition guard; Claude via the Anthropic SDK (with prompt caching), the untested providers via the OpenAI-compatible chat API (httpx) |
-| `persona.py` | Character choice and post-processing (emoji per line) |
+| `persona.py` | The twelve characters: which one speaks, dialogs, post-processing (emoji per line) |
+| `translate.py` | Fixed Telegram texts for languages other than German/English, translated once by the model and stored |
+| `usage.py` | Token usage, estimated cost, monthly budget |
 | `jellyfin.py`, `jellyseerr.py` | API clients |
 | `db.py` | SQLite schema, migrations, queries |
 | `web.py` + `web/` | Web interface (HTML/JS/CSS without a build step; the four designs are CSS scoped by `data-skin`), JSON API, webhook endpoints |
@@ -49,7 +51,7 @@ Browser ────────────▶ web.py ──▶ config.py / mon
 | `setup.py` | Setup assistant: tests unsaved values, finds the Telegram group, creates the Sonarr/Radarr webhooks |
 | `backup.py` | Encrypted backup zip (AES) and restore |
 | `updates.py` | Version check against GitHub per release channel, updates started from the web interface |
-| `i18n.py` | All texts in German and English; language per request (`use_language`), logs always English |
+| `i18n.py` | All texts in German and English; language per request (`use_language`, any language), logs always English |
 | `poster.py` | Placeholder poster for titles without an image |
 
 ## Principles
