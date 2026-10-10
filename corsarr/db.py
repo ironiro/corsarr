@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS carousels (
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS collections (    -- one message per film series ("all parts of …")
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tmdb_id INTEGER NOT NULL,          -- TMDB collection id
+    card TEXT NOT NULL,                -- JSON: name, poster, intro, language, parts (missing ones with suggestion id)
+    message_id INTEGER,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS rejected (
     title_key TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -257,6 +264,18 @@ class DB:
 
     def set_suggestion_file_id(self, suggestion_id: int, file_id: str) -> None:
         self._exec("UPDATE suggestions SET file_id=? WHERE id=?", (file_id, suggestion_id))
+
+    # --- film series (collections) ------------------------------------------
+    def add_collection(self, tmdb_id: int, card: str) -> int:
+        cur = self._exec("INSERT INTO collections(tmdb_id, card, created_at) VALUES(?,?,?)",
+                         (int(tmdb_id), card, iso(now())))
+        return int(cur.lastrowid)
+
+    def collection(self, collection_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM collections WHERE id=?", (collection_id,)).fetchone()
+
+    def set_collection_message(self, collection_id: int, message_id: int) -> None:
+        self._exec("UPDATE collections SET message_id=? WHERE id=?", (message_id, collection_id))
 
     def recently_suggested(self, days: int = 3) -> set[str]:
         since = iso(now() - timedelta(days=days))
