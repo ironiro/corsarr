@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (beta)
+
+- The Corsarr logo in the web interface (header and login) in the Video store, *arr and Friendly designs; the
+  Terminal design stays text only.
+
 ## v1.0.3
 
 - The documentation is now also a [GitHub wiki](https://github.com/ironiro/corsarr/wiki); the "Documentation" link
