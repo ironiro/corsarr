@@ -3,8 +3,8 @@
 ## Unreleased (beta)
 
 - **Security:** saved API keys are only sent to the saved address (typing another address in a form now needs
-  the key too); the web interface refuses unknown host names (protection against DNS rebinding, new setting
-  `ALLOWED_HOSTS`); the Telegram token and API keys never appear in the log, even at DEBUG; restoring a backup
+  the key too); the web interface only answers under known names (protection against DNS rebinding) – another
+  name is allowed with one click on the status page (setting `ALLOWED_HOSTS`), webhooks work under any name; the Telegram token and API keys never appear in the log, even at DEBUG; restoring a backup
   refuses zip bombs and drops invalid settings instead of crashing at the next start; failed logins wait for
   each other; malformed requests get a 400 instead of an error.
 - When two people rate at the same time, both ratings are kept; the others now get a day from the first rating.
@@ -16,6 +16,18 @@
   it is no longer posted twice.
 - A stand-in image is no longer remembered as a title's poster; an episode without numbers no longer blocks all
   download messages; "already requested" in Jellyseerr counts as requested; "Season None" is gone.
+- **Safer updates (Proxmox/LXC):** the new version's Python environment is built before switching, and if the
+  new version does not start, Corsarr switches back to the previous one by itself (including the database if
+  needed). Updates have time limits. The update log is now in `/var/log/corsarr/update.log`, backups before an
+  update in `/var/backups/corsarr/`.
+- The service runs in a systemd sandbox (it can only write to its data directory); the data directory and
+  `/etc/corsarr.env` are no longer readable for other users.
+- Old usage records (after 13 months), download records (after 30 days) and old suggestion cards (after 90 days)
+  are cleaned up daily; only the newest 3 pre-restore copies are kept. "Total" in the usage card therefore
+  covers at most the last 13 months.
+- Python 3.11 or newer (Debian 12) is enough; all dependencies are pinned and checked for known vulnerabilities.
+- Docker: `:beta` no longer moves back to an older stable release, `:latest` only moves with the highest stable
+  release; Docker logs are limited to 30 MB.
 - The Corsarr logo in the web interface (header and login) in the Video store, *arr and Friendly designs; the
   Terminal design stays text only.
 

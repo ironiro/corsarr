@@ -213,17 +213,41 @@ def test_unknown_host_names_are_refused(env):
 
     async def test(client, rt):
         bad = {"Host": "evil.example.com"}
-        assert (await client.get("/health", headers=bad)).status == 403
-        assert (await client.get("/", headers=bad)).status == 403
+        r = await client.get("/", headers=bad)
+        assert r.status == 403 and "evil.example.com" in await r.text()  # a page that explains what to do
         assert (await client.get("/api/i18n", headers=bad)).status == 403
+        # The webhooks check their secret and /health tells nothing: they answer under any name.
+        assert (await client.get("/health", headers=bad)).status == 200
         r = await client.post("/jellyfin", headers={"X-Corsarr-Secret": "hook", **bad}, data="{}")
-        assert r.status == 403 and await r.text() == "unknown host"
-        assert (await client.get("/health")).status == 200  # the test client sends 127.0.0.1:port
+        assert r.status != 403
         assert (await client.get("/health", headers={"Host": "corsarr.lan"})).status == 200
         await login(client)
         r = await client.put("/api/config", headers=H, json={"values": {"ALLOWED_HOSTS": "evil.example.com"}})
         assert r.status == 200 and not (await r.json())["restart"]  # applies without a restart
-        assert (await client.get("/health", headers=bad)).status == 200
+        assert (await client.get("/", headers=bad)).status == 200
+    with_client(test)
+
+
+def test_a_refused_name_can_be_allowed_from_the_status_page(env):
+    async def test(client, rt):
+        other = {"Host": "media.example.org:8787"}
+        assert (await client.get("/", headers=other)).status == 403
+        await login(client)
+        status = await (await client.get("/api/status")).json()
+        assert status["blocked_hosts"] == ["media.example.org"]
+        # Only names that were actually refused, and only from an address that works.
+        assert (await client.post("/api/hosts", headers=H, json={"host": "x.example.org", "allow": True})).status == 400
+        assert (await client.post("/api/hosts", headers={**H, **other},
+                                  json={"host": "media.example.org", "allow": True})).status == 403
+        r = await client.post("/api/hosts", headers=H, json={"host": "media.example.org", "allow": True})
+        assert r.status == 200 and (await r.json())["blocked_hosts"] == []
+        assert "media.example.org" in config.read_overrides(rt.cfg.data_dir)["ALLOWED_HOSTS"]
+        assert (await client.get("/", headers=other)).status == 200
+        # Dismissing only forgets the name.
+        assert (await client.get("/", headers={"Host": "nope.example.org"})).status == 403
+        await client.post("/api/hosts", headers=H, json={"host": "nope.example.org", "allow": False})
+        assert (await (await client.get("/api/status")).json())["blocked_hosts"] == []
+        assert "nope" not in config.read_overrides(rt.cfg.data_dir)["ALLOWED_HOSTS"]
     with_client(test)
 
 
