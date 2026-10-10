@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (beta)
+## v1.0.2
 
 - Budget messages show small amounts precisely (0,016 $ instead of 0,02 $) and the share in per cent; the
   80 % warning says clearly that everything keeps working.
