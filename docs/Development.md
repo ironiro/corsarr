@@ -101,3 +101,9 @@ Every push to `main` builds `:edge`.
 ## Line endings
 
 `.gitattributes` enforces LF so that files edited on Windows (e.g. `install.sh`) run on Linux.
+
+## The wiki
+
+The [wiki](https://github.com/ironiro/corsarr/wiki) is generated from `docs/` – edit the files there, not the wiki.
+`docs/publish-wiki.sh` copies the pages and screenshots into the wiki repository and turns `Page.md` links into
+wiki links.

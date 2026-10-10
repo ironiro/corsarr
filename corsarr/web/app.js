@@ -148,7 +148,7 @@ function footer() {
     h("span", {}, "Corsarr ", h("code", { id: "footver" }, status ? fmtVersion(status.version) : ""),
       " · ", link(`${repo}/blob/main/LICENSE`, T.foot_license)),
     h("nav", { "aria-label": T.foot_links },
-      link(repo, "GitHub"), link(`${repo}/blob/main/docs/Home.md`, T.foot_docs),
+      link(repo, "GitHub"), link(`${repo}/wiki`, T.foot_docs),
       link(`${repo}/releases`, T.foot_releases), link(`${repo}/issues/new`, T.foot_issue)));
 }
 
