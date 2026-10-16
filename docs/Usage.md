@@ -100,7 +100,11 @@ who is in the group from who writes to it or presses its buttons.
   to the back.
 - Playback of less than 5 minutes doesn't count. Unanswered questions expire after 7 days.
 - The bot detects the end of a season itself: whenever playback of an episode stops, it checks Jellyfin to see whether all
-  episodes of the season have been watched.
+  episodes of the season have been watched. Jellyfin only knows downloaded episodes – with Sonarr set up, the bot
+  also asks Sonarr and waits while episodes of the season are still to air or to download, so a running season
+  isn't "finished" after its newest episode. It asks about "the whole series" only when Sonarr says it has ended.
+- After an update the bot tells the group once what changed for them (from the release notes, in its own voice);
+  releases that only concern setup or the web interface aren't announced.
 
 ## Settings in the chat
 
