@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- A season that is still running is no longer treated as finished after its newest episode: with Sonarr set up,
+  Corsarr asks how a season was only when all its episodes have aired, are downloaded and were watched – and
+  asks about "the whole series" only when Sonarr says the series has ended. Without Sonarr it works as before.
+- After an update Corsarr tells the group what changed for them – once per version, in its own voice. Releases
+  that only touch setup, security or the web interface are not announced.
+- **Docker:** "Update now" in the web interface, with a small service on the Docker host
+  (`deploy/docker-update.sh`, `corsarr-docker-update.path`, see `docker-compose.yml`): it pulls the new image,
+  backs up the database and goes back to the previous version if the new one doesn't become healthy.
+
 ## v1.0.4
 
 - **Security:** saved API keys are only sent to the saved address (typing another address in a form now needs

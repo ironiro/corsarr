@@ -26,6 +26,16 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Optional: "Update now" in the web interface. Needs the host service from deploy/ (as root):
+    #   cp deploy/docker-update.sh <this directory>/
+    #   cp deploy/corsarr-docker-update.{path,service} /etc/systemd/system/   (adjust the paths in both)
+    #   touch update.log && systemctl enable --now corsarr-docker-update.path
+    # then use a bind-mounted data directory and these lines instead of the image/volume above:
+    #   image: ghcr.io/ironiro/corsarr:${CORSARR_TAG:-latest}   # the service sets CORSARR_TAG in .env
+    #   volumes: ["./data:/data", "./update.log:/var/log/corsarr-update.log:ro"]
+    #   environment:
+    #     CORSARR_UPDATE_TRIGGER: /data/update-request
+    #     CORSARR_UPDATE_LOG: /var/log/corsarr-update.log
     # Optional: settings from a file instead of (or before) the web interface,
     # template: .env.example
     # env_file:

@@ -335,6 +335,14 @@ feedback.rating dann "none" und feedback.text leer.""",
                      "Feedback: {text}",
     "prompt.say": "Aufgabe: Formuliere eine kurze Telegram-Nachricht (1–4 Zeilen) für diese Situation.\n"
                   "{speaker}\n\nSituation: {situation}",
+    "prompt.update_news": "Aufgabe: Du (Corsarr) wurdest gerade aktualisiert. Unten stehen die Release-Notizen – "
+                          "geschrieben für den Admin. Erzähl der Gruppe in einer kurzen Telegram-Nachricht "
+                          "(2–6 Zeilen) nur, was sie im Chat merken: Neues, worum sie dich bitten können, neue "
+                          "oder geänderte Fragen, Buttons und Nachrichten, behobene Ärgernisse. Lass alles weg, "
+                          "was nur den Admin betrifft: Installation, Updates, Docker, Weboberfläche, Sicherheit, "
+                          "Logs, Einstellungen, interne Korrekturen. Keine Versionsnummern. Merken sie nichts "
+                          "davon, setze relevant=false und lass die Nachricht leer.\n{speaker}\n\n"
+                          "Release-Notizen:\n{changes}",
     "prompt.facts": "Fakten",
     "prompt.avoid": "Das hast du zuletzt geschrieben – wiederhole keine dieser Formulierungen, Bilder oder "
                     "Witze, klinge diesmal anders: {phrases}\n",
@@ -390,6 +398,12 @@ feedback.rating dann "none" und feedback.text leer.""",
     "log.nothing_found": "Keine passenden Titel gefunden für: {request}",
     "log.settings_changed": "Einstellungen geändert: {changes}",
     "log.feedback_asked": "Feedback-Frage gestellt: {title} ({kind})",
+    "log.season_not_complete": "{title} Staffel {season}: alle vorhandenen Folgen gesehen, laut Sonarr kommen "
+                               "aber noch welche – noch keine Frage",
+    "log.season_check_failed": "Sonarr-Abfrage zum Staffelende von {title} fehlgeschlagen: {error}",
+    "log.update_news": "Neuerungen von {version} in der Gruppe angekündigt",
+    "log.update_news_none": "{version}: nichts, was die Gruppe merkt – keine Ankündigung",
+    "log.update_news_failed": "Neuerungen von {version} nicht angekündigt, nächster Versuch in einer Stunde: {error}",
     "log.trait_saved": "Merkmal gespeichert: {direction} {trait} {keywords}",
     "log.not_editable": "Nachricht nicht editierbar: {error}",
     "log.request_failed": "Anfrage {title} fehlgeschlagen: {status} {body}",
@@ -1072,6 +1086,13 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
                      "Feedback: {text}",
     "prompt.say": "Task: write a short Telegram message (1–4 lines) for this situation.\n"
                   "{speaker}\n\nSituation: {situation}",
+    "prompt.update_news": "Task: you (Corsarr) were just updated. Below are the release notes – written for the "
+                          "admin. Tell the group in a short Telegram message (2–6 lines) only what they notice in "
+                          "the chat: new things they can ask you for, new or changed questions, buttons and "
+                          "messages, fixed annoyances. Leave out everything that only concerns the admin: "
+                          "installation, updates, Docker, web interface, security, logs, settings, internal "
+                          "fixes. No version numbers. If they notice none of it, set relevant=false and leave the "
+                          "message empty.\n{speaker}\n\nRelease notes:\n{changes}",
     "prompt.facts": "Facts",
     "prompt.avoid": "This is what you wrote recently – don't repeat any of these phrases, images or jokes, "
                     "sound different this time: {phrases}\n",
@@ -1127,6 +1148,12 @@ empty or null; feedback.rating then "none" and feedback.text empty.""",
     "log.nothing_found": "No matching titles found for: {request}",
     "log.settings_changed": "Settings changed: {changes}",
     "log.feedback_asked": "Feedback question sent: {title} ({kind})",
+    "log.season_not_complete": "{title} season {season}: all available episodes watched, but Sonarr expects "
+                               "more – no question yet",
+    "log.season_check_failed": "Sonarr check for the end of season of {title} failed: {error}",
+    "log.update_news": "Announced what's new in {version} to the group",
+    "log.update_news_none": "{version}: nothing the group notices – no announcement",
+    "log.update_news_failed": "What's new in {version} not announced, next try in an hour: {error}",
     "log.trait_saved": "Trait saved: {direction} {trait} {keywords}",
     "log.not_editable": "Message not editable: {error}",
     "log.request_failed": "Request for {title} failed: {status} {body}",

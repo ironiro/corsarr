@@ -6,6 +6,9 @@ import logging
 from datetime import timedelta
 from typing import Awaitable, Callable
 
+import httpx
+
+from . import arr
 from .db import DB, iso, now, parse_iso
 from .i18n import t
 from .jellyfin import Jellyfin, item_label
@@ -29,11 +32,15 @@ RATING_VALUE = {"up": 1, "meh": 0, "down": -1}
 
 # notifier(request) -> True when the question was posted
 Notifier = Callable[[dict], Awaitable[bool]]
+# sonarr() -> (url, api key) as currently configured; empty when Sonarr isn't set up
+SonarrAccess = Callable[[], tuple[str, str]]
 
 
 class FeedbackService:
-    def __init__(self, db: DB, jellyfin: Jellyfin, seerr: Jellyseerr, profiles: ProfileBuilder):
+    def __init__(self, db: DB, jellyfin: Jellyfin, seerr: Jellyseerr, profiles: ProfileBuilder,
+                 sonarr: SonarrAccess | None = None):
         self.db, self.jellyfin, self.seerr, self.profiles = db, jellyfin, seerr, profiles
+        self.sonarr = sonarr or (lambda: ("", ""))
         self.notifier: Notifier | None = None
         self._rating_locks: dict[int, asyncio.Lock] = {}  # per request: two people rating at the same time
 
@@ -126,9 +133,27 @@ class FeedbackService:
         for r in self.db.open_requests_for(series_id, ("season",)):
             if r["extra"].get("season") == season:
                 return
+        # Jellyfin only knows downloaded episodes: a running season looks finished after its newest episode.
+        state = await self._sonarr_season(tmdb, season, title)
+        if state and not state["complete"]:
+            log.info(t("log.season_not_complete", title=title, season=season))
+            return
+        if state and not state["ended"]:
+            series_done = False  # all seasons so far watched, but more are coming
         req_id = self.db.add_request("season", key, series_id, title, "tv", now(), status="pending",
                                      extra={"season": season, "series_done": series_done})
         await self._send(req_id)
+
+    async def _sonarr_season(self, tmdb, season, title: str) -> dict | None:
+        """Sonarr's view of the season (see arr.season_state); None without Sonarr or when it fails."""
+        url, key = self.sonarr()
+        if not (url and key):
+            return None
+        try:
+            return await arr.season_state(url, key, tmdb, season)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+            log.warning(t("log.season_check_failed", title=title, error=e))
+            return None
 
     # --- periodic job -------------------------------------------------------
     async def tick(self) -> None:

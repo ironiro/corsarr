@@ -105,6 +105,55 @@ def imported(ep_id, season, number, aired, event="downloadFolderImported", reaso
     return rec
 
 
+def season(sonarr_series, eps, tmdb=247718, number=2, seen=None):
+    """arr.season_state against a fake Sonarr with these series and episodes."""
+    import httpx
+
+    def handler(request):
+        if seen is not None:
+            seen.append((request.url.path, dict(request.url.params)))
+        return httpx.Response(200, json=sonarr_series if request.url.path.endswith("/series") else eps)
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await arr.season_state("http://sonarr:8989/", "key", tmdb, number, client=client)
+    return asyncio.run(go())
+
+
+def ep(number, days, has_file, monitored=True):
+    """An episode of season 2, aired `days` ago (negative: still to come; None: no date yet)."""
+    aired = None if days is None else iso(now() - timedelta(days=days)).replace("+00:00", "Z")
+    return {"seasonNumber": 2, "episodeNumber": number, "airDateUtc": aired, "hasFile": has_file,
+            "monitored": monitored}
+
+
+def test_season_still_running_in_sonarr_is_not_complete():
+    # MobLand season 2: 5 of 10 episodes aired and downloaded – Jellyfin only shows these 5
+    eps = [ep(n, 35 - 7 * n, True) for n in range(1, 6)] + [ep(n, -7 * (n - 5), False) for n in range(6, 11)]
+    seen = []
+    state = season([{**MOBLAND, "status": "continuing"}], eps, seen=seen)
+    assert state == {"complete": False, "ended": False}
+    assert seen[1] == ("/api/v3/episode", {"seriesId": "7", "seasonNumber": "2"})
+
+
+def test_season_complete_only_when_everything_aired_and_downloaded():
+    done = [ep(n, 60 - n, True) for n in range(1, 4)]
+    assert season([{**MOBLAND, "status": "ended"}], done) == {"complete": True, "ended": True}
+    assert season([{**MOBLAND, "status": "continuing"}], done) == {"complete": True, "ended": False}
+    # aired but not downloaded yet: not finished either
+    assert season([MOBLAND], done + [ep(4, 2, False)])["complete"] is False
+    # announced without a date: still to come
+    assert season([MOBLAND], done + [ep(4, None, False)])["complete"] is False
+    # an episode nobody wants (unmonitored, no file) doesn't hold the season open
+    assert season([MOBLAND], done + [ep(4, 30, False, monitored=False)])["complete"] is True
+
+
+def test_season_unknown_to_sonarr_decides_nothing():
+    assert season([MOBLAND], [], tmdb=999) is None              # series not in Sonarr
+    assert season([MOBLAND], []) is None                        # no such season in Sonarr
+    assert season([MOBLAND], [ep(1, 9, True)], number=None) is None
+
+
 def catch_up(db, kind, records, seen=None):
     async def go():
         async with history(records, seen) as client:
