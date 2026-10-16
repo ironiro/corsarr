@@ -172,6 +172,11 @@ class TraitResult(BaseModel):
     reply: str = Field(description="short confirmation in the speaker's style")
 
 
+class UpdateNews(BaseModel):
+    relevant: bool = Field(description="true only if at least one change is noticeable for the people in the chat")
+    message: str = Field(description="the message for the group in the speaker's style, empty if nothing is relevant")
+
+
 class _Claude:
     """Anthropic's API through the official SDK – the tested and recommended provider."""
     provider = "claude"
@@ -561,6 +566,14 @@ class LLM:
         res: TraitResult = await self._call(self._avoid() + prompt, TraitResult, max_tokens=1500)
         res.reply = persona.enforce(res.reply, speaker)
         self._remember(res.reply)
+        return res
+
+    async def update_news(self, changes: str, speaker: str) -> UpdateNews:
+        """The release notes since the last announced version, turned into what the group notices – or nothing."""
+        prompt = t("prompt.update_news", speaker=persona.speaker_instruction(speaker), changes=changes)
+        res: UpdateNews = await self._call(self._avoid() + prompt, UpdateNews, max_tokens=1200)
+        res.message = persona.enforce(res.message, speaker) if res.relevant and res.message.strip() else ""
+        self._remember(res.message)
         return res
 
     async def say(self, situation: str, speaker: str, facts: dict | None = None) -> str:

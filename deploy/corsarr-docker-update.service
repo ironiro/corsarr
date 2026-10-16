@@ -1,0 +1,13 @@
+[Unit]
+Description=Update Corsarr's Docker container (requested in the web interface)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Pulling the image, waiting for the health check and a possible rollback
+TimeoutStartSec=20min
+Environment=CORSARR_STACK=/opt/stacks/corsarr
+# A copy: the stack directory may be replaced by a deploy while the update runs.
+ExecStart=/bin/bash -c 'cp /opt/stacks/corsarr/docker-update.sh /run/corsarr-docker-update.sh && exec bash /run/corsarr-docker-update.sh'
+PrivateTmp=yes

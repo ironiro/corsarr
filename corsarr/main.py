@@ -208,7 +208,9 @@ class Runtime:
         self.llm.budget_reached = lambda: usage.budget_reached(self.db, self.cfg)  # self.cfg: budget changes live
         profiles = ProfileBuilder(self.db, self.jellyfin)
         recommender = Recommender(self.db, self.jellyfin, self.seerr, self.llm, profiles)
-        self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles)
+        # Sonarr access is read on every check: it can be changed live in the web interface.
+        self.feedback = FeedbackService(self.db, self.jellyfin, self.seerr, profiles,
+                                        sonarr=lambda: (self.cfg.get("SONARR_URL"), self.cfg.get("SONARR_API_KEY")))
         self.corsarr = CorsarrBot(cfg, self.db, self.jellyfin, self.seerr, self.llm, recommender, self.feedback)
         self.feedback.notifier = self.corsarr.ask_feedback
         self.corsarr.on_config_change = self.apply_live_config
@@ -237,6 +239,8 @@ class Runtime:
             app.job_queue.run_repeating(bot.job_budget, interval=jobs.BUDGET_INTERVAL, first=jobs.BUDGET_FIRST)
             app.job_queue.run_repeating(bot.job_retention, interval=jobs.RETENTION_INTERVAL,
                                         first=jobs.RETENTION_FIRST)
+            app.job_queue.run_repeating(bot.job_update_news, interval=jobs.UPDATE_NEWS_INTERVAL,
+                                        first=jobs.UPDATE_NEWS_FIRST)
             await app.start()
             await app.updater.start_polling(
                 allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=True,

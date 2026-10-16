@@ -192,6 +192,50 @@ def test_season_end_detected_from_jellyfin(db):
     assert [(r["kind"], r["extra"]["season"]) for r in sent] == [("season", 1)]
 
 
+def _season_finished(db, monkeypatch, state=None, error=None, sonarr=("http://sonarr:8989", "key")):
+    """The last available episode of season 1 was just watched; Sonarr answers `state` (or raises)."""
+    from corsarr import arr
+    calls = []
+
+    async def fake_state(url, key, tmdb, season, client=None):
+        calls.append((url, key, tmdb, season))
+        if error:
+            raise error
+        return state
+    monkeypatch.setattr(arr, "season_state", fake_state)
+    series = {"Id": "s1", "Type": "Series", "Name": "Serie", "ProviderIds": {"Tmdb": "77"},
+              "UserData": {"Played": True}}  # Jellyfin: everything there is watched
+    ep = {"Id": "e3", "Type": "Episode", "SeriesId": "s1", "SeasonId": "se1", "ParentIndexNumber": 1,
+          "RunTimeTicks": 45 * TICKS_MIN, "UserData": {"Played": True}}
+    svc, sent = make_feedback(db, {"s1": series, "e3": ep}, season=[{"Id": "e3", "UserData": {"Played": True}}])
+    svc.sonarr = lambda: sonarr
+    run(svc.on_playback_stop({"event": "PlaybackStop", "itemId": "e3"}))
+    return sent, calls
+
+
+def test_no_season_question_while_sonarr_expects_more_episodes(db, monkeypatch):
+    sent, calls = _season_finished(db, monkeypatch, state={"complete": False, "ended": False})
+    assert sent == [] and calls == [("http://sonarr:8989", "key", "77", 1)]
+    assert db.conn.execute("SELECT COUNT(*) c FROM feedback_requests").fetchone()["c"] == 0
+
+
+def test_season_question_but_not_whole_series_while_it_continues(db, monkeypatch):
+    sent, _ = _season_finished(db, monkeypatch, state={"complete": True, "ended": False})
+    assert [(r["kind"], r["extra"]["series_done"]) for r in sent] == [("season", False)]
+    sent, _ = _season_finished(db, monkeypatch, state={"complete": True, "ended": True})
+    assert sent == []  # season 1 was asked already above
+
+
+def test_season_end_falls_back_to_jellyfin_without_sonarr(db, monkeypatch):
+    import httpx
+    sent, calls = _season_finished(db, monkeypatch, sonarr=("", ""))  # not set up: Sonarr isn't asked
+    assert calls == [] and [r["extra"]["series_done"] for r in sent] == [True]
+    db.conn.execute("DELETE FROM feedback_requests")
+    db.conn.commit()
+    sent, _ = _season_finished(db, monkeypatch, error=httpx.ConnectError("down"))  # unreachable: as before
+    assert [r["kind"] for r in sent] == ["season"]
+
+
 def test_series_pause_question(db):
     svc, sent = make_feedback(db, {})
     db.touch_watch_state("s1", "tv:77", "Serie", "tv", 1.0, False)
