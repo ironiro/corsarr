@@ -147,7 +147,8 @@ choice is remembered in your browser.
   webhook, Sonarr, Radarr) – OK/error with a short detail and time. Checked every 5 minutes (for Claude, only
   the key and model, which is free) and also whenever the bot actually uses a service. Buttons: *Check now*,
   *Restart bot*. Below the bot: **Version** – installed vs. newest version in your channel, the changes in
-  between and, for LXC installations, an *Update now* button (→ [Operations](Operations.md#update)).
+  between and, for LXC installations (and Docker with the host service), an *Update now* button
+  (→ [Operations](Operations.md#update)).
 
 ![Events: what the bot understood, suggested and reported](images/events.jpg)
 

@@ -78,8 +78,22 @@ and `corsarr.db-shm` next to it). Configurations from older versions are always 
 **From the web interface:** under **Status → Version** Corsarr shows the installed version, the newest one in
 your channel with its release notes (or the list of commits on the development channel). With the LXC/Proxmox installation, **Update now** installs it:
 the app drops a request file, a small root service (`corsarr-update.path`) runs the installer, and Corsarr
-restarts. The page reconnects by itself and shows the installer's output. With Docker or a manual install,
-the page shows the command to run instead.
+restarts. The page reconnects by itself and shows the installer's output. With a manual install the page
+shows the command to run instead; so does Docker, unless you set up the host service below.
+
+**Docker with "Update now":** a container can't replace its own image, so a small service on the Docker host
+does it (as root, files in `deploy/`):
+
+1. Copy `deploy/docker-update.sh` into the stack directory (next to `docker-compose.yml`) and
+   `deploy/corsarr-docker-update.path` / `.service` to `/etc/systemd/system/` – adjust the paths in both if the
+   stack isn't in `/opt/stacks/corsarr`.
+2. In `docker-compose.yml` use a bind-mounted data directory and the lines shown there (`CORSARR_TAG`,
+   `CORSARR_UPDATE_TRIGGER`, `CORSARR_UPDATE_LOG`, the read-only `update.log`); create the log with `touch update.log`.
+3. `systemctl enable --now corsarr-docker-update.path` and `docker compose up -d`.
+
+The button then works as with LXC: the service pulls the image for the new version, copies the database to
+`update-backups/` (newest 3 kept), recreates the container and waits for Docker's health check. If the new
+version doesn't become healthy, it goes back to the previous tag and database. The output appears on the page.
 
 Installations made before this feature existed get the update service with the next command-line update
 below; after that the button works.
