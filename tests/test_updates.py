@@ -156,3 +156,90 @@ def test_version_file_and_targets(tmp_path, monkeypatch):
     # Only vX.Y.Z and vX.Y.Z-beta.N are releases; other pre-release styles are ignored everywhere.
     for odd in ("v1.2.3-rc.1", "v1.2.3-alpha.1", "v1.2.3-beta", "1.2.3", "v1.2.3.4"):
         assert updates.version_key(odd) is None and not updates.valid_target(odd)
+
+
+# --- telling the group what's new after an update -----------------------------------------------------
+
+NEWS_RELEASES = [
+    {"tag_name": "v1.2.0", "body": "- Corsarr waits for the end of a running season.", "draft": False},
+    {"tag_name": "v1.2.0-beta.1", "body": "- beta of the season change", "draft": False},
+    {"tag_name": "v1.1.1", "body": "- Docker: updates from the web interface.", "draft": False},
+    {"tag_name": "v1.1.0", "body": "- already announced", "draft": False},
+    {"tag_name": "v1.3.0", "body": "- draft", "draft": True},
+]
+
+
+def changes(previous, current, status=200):
+    async def go():
+        transport = httpx.MockTransport(lambda r: httpx.Response(status, json=NEWS_RELEASES))
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await updates.changes_since(previous, current, client=client)
+    return asyncio.run(go())
+
+
+def test_changes_since_the_last_announced_version():
+    assert [c["tag"] for c in changes("v1.1.0", "v1.2.0")] == ["v1.1.1", "v1.2.0"]  # oldest first, no betas
+    assert [c["tag"] for c in changes("v1.1.1", "v1.2.0-beta.1")] == ["v1.2.0-beta.1"]  # a beta tells its own
+    assert changes("v1.2.0", "v1.2.0") == [] and changes("v1.2.0", "v1.1.0") == []
+    assert changes(None, "v1.2.0") == [] and changes("v1.1.0", "a" * 40) == []  # first start / dev build
+    try:
+        changes("v1.1.0", "v1.2.0", status=403)
+        assert False, "GitHub errors must surface, the job tries again later"
+    except httpx.HTTPStatusError:
+        pass
+
+
+class NewsLLM:
+    def __init__(self, message):
+        self.message, self.seen = message, []
+
+    async def update_news(self, notes, speaker):
+        from corsarr.llm import UpdateNews
+        self.seen.append(notes)
+        return UpdateNews(relevant=bool(self.message), message=self.message)
+
+
+def news_job(db, monkeypatch, version, message="📱 Neu: ich warte jetzt aufs Staffelende.", fail=None):
+    from helpers import make_bot
+    bot = make_bot(db, llm=NewsLLM(message))
+    bot.chat_language = lambda: "de"
+    monkeypatch.setattr(updates, "current_version", lambda: version)
+
+    async def fake_changes(previous, current, client=None):
+        if fail:
+            raise fail
+        return [{"tag": current, "notes": f"notes since {previous}"}]
+    monkeypatch.setattr(updates, "changes_since", fake_changes)
+    asyncio.run(bot.job_update_news(None))
+    return bot.app.bot.messages, bot.llm.seen
+
+
+def test_update_news_posted_once_per_version(db, monkeypatch):
+    sent, seen = news_job(db, monkeypatch, "v1.1.0")
+    assert sent == [] and seen == []  # first start: only remembers the version
+    sent, seen = news_job(db, monkeypatch, "v1.2.0")
+    assert [m for m, _ in sent] == ["📱 Neu: ich warte jetzt aufs Staffelende."]
+    assert seen == ["v1.2.0\nnotes since v1.1.0"]
+    sent, _ = news_job(db, monkeypatch, "v1.2.0")
+    assert sent == []  # the hourly job doesn't repeat it
+
+
+def test_update_news_silent_when_nothing_concerns_the_group(db, monkeypatch):
+    news_job(db, monkeypatch, "v1.1.0")
+    sent, seen = news_job(db, monkeypatch, "v1.1.1", message="")
+    assert sent == [] and seen and db.get_state("announced_version") == "v1.1.1"
+
+
+def test_update_news_retried_when_github_fails(db, monkeypatch):
+    news_job(db, monkeypatch, "v1.1.0")
+    sent, _ = news_job(db, monkeypatch, "v1.2.0", fail=httpx.ConnectError("offline"))
+    assert sent == [] and db.get_state("announced_version") == "v1.1.0"  # still to tell
+    sent, _ = news_job(db, monkeypatch, "v1.2.0")
+    assert len(sent) == 1
+
+
+def test_no_update_news_for_dev_builds_or_downgrades(db, monkeypatch):
+    news_job(db, monkeypatch, "v1.2.0")
+    assert news_job(db, monkeypatch, "c" * 40) == ([], [])
+    sent, seen = news_job(db, monkeypatch, "v1.1.0")  # back to an older release
+    assert sent == [] and seen == [] and db.get_state("announced_version") == "v1.1.0"
