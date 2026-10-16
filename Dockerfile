@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # tzdata: log timestamps and "last watched" dates in local time (set TZ, e.g. Europe/Berlin)
 RUN apt-get update \
