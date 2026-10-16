@@ -6,7 +6,9 @@ How an update runs depends on how Corsarr was installed:
   dependencies, restarts Corsarr and rolls back if the new version does not start. Its output goes
   to a root-owned log (CORSARR_UPDATE_LOG) the app only reads. The app itself never gets write
   access to its own code.
-- docker: a container can't replace its own image – the web interface shows the command instead.
+- docker: a container can't replace its own image – the web interface shows the command instead. With the
+  host service from deploy/ (docker-update.sh, corsarr-docker-update.path) and CORSARR_UPDATE_TRIGGER set in
+  the container it works like "service": the host pulls the new image and recreates the container.
 - manual: started by hand from a git checkout – the web interface shows `git pull`.
 
 Release channels: stable = the newest release tag (v1.2.0), beta = the newest tag including
@@ -228,6 +230,34 @@ async def _check_releases(client: httpx.AsyncClient, current: str | None, channe
             "releases": releases,
             # e.g. switched from beta back to stable: the newest stable is older than what runs now
             "downgrade": have is not None and version_key(latest) < have}
+
+
+async def changes_since(previous: str | None, current: str | None,
+                        client: httpx.AsyncClient | None = None) -> list[dict]:
+    """Release notes of the versions after `previous` up to `current`, oldest first: [{"tag", "notes"}].
+
+    Betas count only when `current` is a beta itself (a stable release repeats what its betas brought).
+    Empty when there is nothing in between; raises httpx.HTTPError when GitHub can't be reached.
+    """
+    have, new = version_key(previous), version_key(current)
+    if have is None or new is None or new <= have:
+        return []
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=15, headers={"Accept": "application/vnd.github+json"})
+    try:
+        r = await client.get(f"https://api.github.com/repos/{UPSTREAM}/releases", params={"per_page": 30})
+        r.raise_for_status()
+        releases = r.json()
+    finally:
+        if own:
+            await client.aclose()
+    betas = "-" in (current or "")
+    found = [{"tag": rel["tag_name"], "notes": (rel.get("body") or "").strip()[:4000]}
+             for rel in releases
+             if not rel.get("draft") and version_key(rel.get("tag_name"))
+             and have < version_key(rel["tag_name"]) <= new and (betas or "-" not in rel["tag_name"])]
+    found.sort(key=lambda c: version_key(c["tag"]))
+    return found
 
 
 async def _release_notes(client: httpx.AsyncClient) -> dict[str, dict]:

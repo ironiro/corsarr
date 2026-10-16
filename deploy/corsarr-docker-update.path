@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for a Corsarr update requested in the web interface (Docker)
+
+[Path]
+# Written by the app in the container (CORSARR_UPDATE_TRIGGER=/data/update-request) when someone presses
+# "Update now". Adjust the path to where the stack's data directory is on this host.
+PathExists=/opt/stacks/corsarr/data/update-request
+Unit=corsarr-docker-update.service
+
+[Install]
+WantedBy=multi-user.target

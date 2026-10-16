@@ -9,7 +9,7 @@ import httpx
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from . import arr, retention, usage
+from . import arr, retention, updates, usage
 from .i18n import t, use_language
 from .llm import LLMFailed, LLMUnavailable
 
@@ -22,6 +22,9 @@ DOWNLOADS_INTERVAL, DOWNLOADS_FIRST = 60, 10
 CATCH_UP_INTERVAL, CATCH_UP_FIRST = 600, 20
 BUDGET_INTERVAL, BUDGET_FIRST = 600, 60
 RETENTION_INTERVAL, RETENTION_FIRST = 24 * 3600, 120
+UPDATE_NEWS_INTERVAL, UPDATE_NEWS_FIRST = 3600, 90  # after an update; retried hourly while GitHub/the model fail
+
+ANNOUNCED = "announced_version"  # state key: the version whose news the group got (or that had none)
 
 
 def in_chat_language(method):
@@ -115,6 +118,38 @@ class JobsMixin:
             await self.feedback.tick()
         except Exception:
             log.exception(t("log.feedback_job_failed"))
+
+    @in_chat_language
+    async def job_update_news(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """After an update: tell the group once what changed for them. The release notes are written for
+        admins – the model keeps only what people notice in the chat and posts nothing if that's none."""
+        current = updates.current_version()
+        new = updates.version_key(current)
+        if new is None:
+            return  # a dev build: no release notes to tell from
+        seen = self.db.get_state(ANNOUNCED)
+        if seen == current:
+            return
+        have = updates.version_key(seen)
+        if have is None or new < have:
+            self.db.set_state(ANNOUNCED, current)  # first start or a downgrade: nothing to announce
+            return
+        if self.down:
+            return
+        try:
+            changes = await updates.changes_since(seen, current)
+            if changes:
+                notes = "\n\n".join(f"{c['tag']}\n{c['notes']}" for c in changes)
+                news = await self.llm.update_news(notes, self.speaker())
+                if news.message:
+                    await self.post(news.message)
+                    log.info(t("log.update_news", version=current))
+                else:
+                    log.info(t("log.update_news_none", version=current))
+        except (httpx.HTTPError, LLMUnavailable, LLMFailed, TelegramError) as e:
+            log.warning(t("log.update_news_failed", version=current, error=e))
+            return  # again in an hour
+        self.db.set_state(ANNOUNCED, current)
 
     async def job_retention(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Once a day: drop what nothing reads any more (see retention.py)."""
