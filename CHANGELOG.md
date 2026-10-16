@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.5
 
 - A season that is still running is no longer treated as finished after its newest episode: with Sonarr set up,
   Corsarr asks how a season was only when all its episodes have aired, are downloaded and were watched – and
