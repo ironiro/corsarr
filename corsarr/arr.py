@@ -106,6 +106,38 @@ async def catch_up(db: DB, kind: str, url: str, api_key: str, client: httpx.Asyn
     return added
 
 
+async def season_state(url: str, api_key: str, tmdb_id: int | str | None, season: int | None,
+                       client: httpx.AsyncClient | None = None) -> dict | None:
+    """What Sonarr knows about a season Jellyfin only shows as far as it is downloaded.
+
+    {"complete": False} when an episode is still to come (air date in the future or not set yet) or aired but
+    not downloaded (monitored, no file); "ended": Sonarr's series status. None when Sonarr doesn't know the
+    series (or no season/TMDB id): the caller then decides by Jellyfin alone, like before.
+    """
+    if not tmdb_id or season is None:
+        return None
+    async with borrowed_client(client, timeout=15) as c:
+        r = await c.get(f"{arr_api(url)}/series", headers=arr_headers(api_key))
+        r.raise_for_status()
+        series = next((s for s in r.json() if str(s.get("tmdbId")) == str(tmdb_id)), None)
+        if not series:
+            return None
+        r = await c.get(f"{arr_api(url)}/episode", headers=arr_headers(api_key),
+                        params={"seriesId": series["id"], "seasonNumber": season})
+        r.raise_for_status()
+        episodes = r.json()
+    if not episodes:  # e.g. a season numbered differently in Sonarr than in Jellyfin
+        return None
+    moment = now()
+    complete = True
+    for ep in episodes:
+        aired = _aired(ep.get("airDateUtc"))
+        if aired is None or aired > moment or (ep.get("monitored") and not ep.get("hasFile")):
+            complete = False
+            break
+    return {"complete": complete, "ended": series.get("status") == "ended"}
+
+
 def due_messages(db: DB) -> list[tuple[list[int], str]]:
     """Messages for every series/movie whose imports have settled: [(import ids, text)]."""
     groups: dict[str, list[dict]] = {}
